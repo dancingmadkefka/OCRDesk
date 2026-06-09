@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+settings.json
+logs/
+*.log
+node_modules/
+frontend/dist/
+.env
+.venv/
+venv/
