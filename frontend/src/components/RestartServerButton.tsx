@@ -24,7 +24,7 @@ export default function RestartServerButton() {
 
   async function handleRestart() {
     if (restarting) return;
-    if (!confirm("Restart the server? The page will reload when it is back.")) return;
+    if (!confirm("Rebuild the frontend and restart the server? The page will reload when it is back.")) return;
 
     setRestarting(true);
     setError(null);
@@ -35,7 +35,9 @@ export default function RestartServerButton() {
         /* connection may drop before the response completes */
       }
       await waitForServer();
-      window.location.reload();
+      const url = new URL(window.location.href);
+      url.searchParams.set("_", String(Date.now()));
+      window.location.replace(url.toString());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Restart failed");
       setRestarting(false);
@@ -49,9 +51,9 @@ export default function RestartServerButton() {
         className="btn small ghost"
         onClick={() => void handleRestart()}
         disabled={restarting}
-        title="Stop and start the API server (reloads frontend assets)"
+        title="Rebuild frontend, restart API server, and reload the page"
       >
-        {restarting ? "Restarting…" : "Restart server"}
+        {restarting ? "Rebuilding…" : "Restart server"}
       </button>
       {error && <span className="restart-server-error dim">{error}</span>}
     </div>

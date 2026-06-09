@@ -15,10 +15,16 @@ export function normalizeForCompare(text: string): string {
 
 /** Remove scripts and inline handlers; keep document structure and CSS. */
 export function stripUnsafe(html: string): string {
-  return DOMPurify.sanitize(html, {
+  const withoutExecutableBlocks = html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, "")
+    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript\s*>/gi, "");
+
+  return DOMPurify.sanitize(withoutExecutableBlocks, {
+    // Browser DOMPurify drops <head>/<style> without this; GT docs render as plain text.
+    WHOLE_DOCUMENT: true,
     ADD_TAGS: ["style"],
     ADD_ATTR: ["style", "class", "id"],
-    FORBID_TAGS: ["script", "iframe", "object", "embed", "link", "meta"],
+    FORBID_TAGS: ["script", "iframe", "object", "embed", "link"],
     FORBID_ATTR: ["srcdoc"],
   });
 }

@@ -1,29 +1,43 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import RestartServerButton from "./RestartServerButton";
 
 export default function Layout() {
+  const { pathname } = useLocation();
+  const cinema = pathname.startsWith("/workspace");
+
   return (
-    <div className="app-shell">
-      <header className="topbar">
-        <NavLink to="/" className="brand">
-          <span className="brand-mark">◫</span>
-          <span className="brand-text">OCR Benchmark</span>
-        </NavLink>
-        <nav className="topnav">
-          <NavLink to="/" end className={({ isActive }) => (isActive ? "active" : "")}>
-            Dashboard
+    <div className={`app-shell${cinema ? " cinema" : ""}`}>
+      {!cinema && (
+        <aside className="sidebar">
+          <NavLink to="/" className="sidebar-brand" title="OCRDesk">
+            <span className="sidebar-logo">OCR</span>
+            <span className="sidebar-tagline">Desk</span>
           </NavLink>
-          <NavLink to="/settings" className={({ isActive }) => (isActive ? "active" : "")}>
-            Settings
-          </NavLink>
-        </nav>
-        <div className="topbar-actions">
-          <RestartServerButton />
-        </div>
-      </header>
-      <main className="main-content">
+
+          <nav className="sidebar-nav">
+            <NavLink to="/" end className={({ isActive }) => `sidebar-link${isActive ? " active" : ""}`}>
+              <span className="sidebar-link-icon" aria-hidden>
+                ⊞
+              </span>
+              <span>Corpus</span>
+            </NavLink>
+            <NavLink to="/settings" className={({ isActive }) => `sidebar-link${isActive ? " active" : ""}`}>
+              <span className="sidebar-link-icon" aria-hidden>
+                ⚙
+              </span>
+              <span>Settings</span>
+            </NavLink>
+          </nav>
+
+          <div className="sidebar-footer">
+            <RestartServerButton />
+          </div>
+        </aside>
+      )}
+
+      <div className="app-stage">
         <Outlet />
-      </main>
+      </div>
     </div>
   );
 }

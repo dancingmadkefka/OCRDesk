@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 settings.json
+images/
 logs/
 *.log
 node_modules/
@@ -8,3 +9,10 @@ frontend/dist/
 .env
 .venv/
 venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage/
+htmlcov/
+*.egg-info/

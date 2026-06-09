@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type OcrJob, type Settings } from "../api";
+import { getOcrJobSnapshot, startTrackedOcrJob, subscribeOcrJobs, type TrackedOcrJob } from "../ocrJobs";
 
 interface Props {
   stems: string[];
@@ -14,6 +15,26 @@ const BACKENDS = [
   { id: "openai", label: "OpenAI" },
   { id: "anthropic", label: "Anthropic" },
 ] as const;
+
+let lmModelsCache: string[] | null = null;
+let lmModelsPromise: Promise<string[]> | null = null;
+
+async function getCachedLmModels(): Promise<string[]> {
+  if (lmModelsCache) return lmModelsCache;
+  if (!lmModelsPromise) {
+    lmModelsPromise = api
+      .getLmModels()
+      .then((r) => {
+        lmModelsCache = r.models;
+        return r.models;
+      })
+      .catch((e) => {
+        lmModelsPromise = null;
+        throw e;
+      });
+  }
+  return lmModelsPromise;
+}
 
 function safeName(s: string): string {
   return s.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/^_|_$/g, "");
@@ -30,9 +51,11 @@ export default function OcrPanel({ stems, existingModelsByStem, onComplete, comp
   const [overwrite, setOverwrite] = useState(false);
   const [lmModels, setLmModels] = useState<string[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [job, setJob] = useState<OcrJob | null>(null);
+  const [jobs, setJobs] = useState<TrackedOcrJob[]>(() => getOcrJobSnapshot());
+  const [startedJobId, setStartedJobId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const completedNotifiedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     api.getSettings().then(setSettings).catch(() => setSettings(null));
@@ -44,22 +67,38 @@ export default function OcrPanel({ stems, existingModelsByStem, onComplete, comp
 
   useEffect(() => {
     if (backend === "lmstudio") {
-      api.getLmModels().then((r) => setLmModels(r.models)).catch(() => setLmModels([]));
+      getCachedLmModels().then(setLmModels).catch(() => setLmModels([]));
     }
   }, [backend]);
 
   useEffect(() => {
-    if (!job || job.status === "completed") return;
-    const timer = setInterval(async () => {
-      const updated = await api.getOcrJob(job.id);
-      setJob(updated);
-      if (updated.status === "completed") {
-        setRunning(false);
-        onComplete?.();
-      }
-    }, 800);
-    return () => clearInterval(timer);
-  }, [job, onComplete]);
+    return subscribeOcrJobs(() => setJobs(getOcrJobSnapshot()));
+  }, []);
+
+  const relevantJobs = useMemo(
+    () =>
+      jobs.filter((job) =>
+        job.requestedStems.some((stem) => stems.includes(stem)) ||
+        job.results.some((result) => stems.includes(result.stem))
+      ),
+    [jobs, stems]
+  );
+
+  const job = useMemo<OcrJob | null>(() => {
+    if (startedJobId) return relevantJobs.find((j) => j.id === startedJobId) ?? relevantJobs[0] ?? null;
+    return relevantJobs[0] ?? null;
+  }, [relevantJobs, startedJobId]);
+
+  useEffect(() => {
+    const active = relevantJobs.some((j) => j.status !== "completed");
+    setRunning(active);
+    const newlyCompleted = relevantJobs.filter(
+      (j) => j.status === "completed" && !completedNotifiedRef.current.has(j.id)
+    );
+    if (!newlyCompleted.length) return;
+    newlyCompleted.forEach((j) => completedNotifiedRef.current.add(j.id));
+    onComplete?.();
+  }, [relevantJobs, onComplete]);
 
   const targetModel = useMemo(() => {
     if (model) return model;
@@ -81,14 +120,13 @@ export default function OcrPanel({ stems, existingModelsByStem, onComplete, comp
     setError(null);
     setRunning(true);
     try {
-      const { job_id } = await api.createOcrJob({
+      const j = await startTrackedOcrJob({
         backend,
         model: model || undefined,
         stems,
         overwrite,
       });
-      const j = await api.getOcrJob(job_id);
-      setJob(j);
+      setStartedJobId(j.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start job");
       setRunning(false);
@@ -144,15 +182,16 @@ export default function OcrPanel({ stems, existingModelsByStem, onComplete, comp
             onChange={(e) => setOverwrite(e.target.checked)}
             disabled={running}
           />
-          Overwrite existing results
+          Overwrite existing
         </label>
+        <div className="ocr-spacer" />
         <button
           className="btn primary"
           onClick={handleRun}
           disabled={running || !stems.length || blocked}
-          title={blocked ? "Enable Overwrite to replace existing results" : undefined}
+          title={blocked ? "Enable Overwrite to replace existing results" : !stems.length ? "Select documents first" : undefined}
         >
-          {running ? "Running…" : `Run OCR (${stems.length})`}
+          {running ? "Running…" : stems.length ? `Run OCR · ${stems.length}` : "Run OCR"}
         </button>
       </div>
 

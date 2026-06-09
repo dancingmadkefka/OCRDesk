@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import sys
 import time
@@ -12,11 +14,11 @@ PORT = 8877
 LOG_FILE = ROOT / "logs" / "server.log"
 
 
-def _win_creationflags(hidden: bool) -> int:
+def _win_creationflags(hidden: bool, *, detached: bool = False) -> int:
     if sys.platform != "win32":
         return 0
     flags = subprocess.CREATE_NO_WINDOW
-    if hidden:
+    if hidden and detached:
         flags |= subprocess.DETACHED_PROCESS
     return flags
 
@@ -42,7 +44,7 @@ def kill_port(port: int) -> None:
             ["powershell", "-NoProfile", "-Command", ps1],
             cwd=ROOT,
             check=False,
-            creationflags=_win_creationflags(hidden=True),
+            creationflags=_win_creationflags(hidden=True, detached=False),
         )
 
         # 2. netstat fallback for listen rows on the exact local endpoint.
@@ -59,7 +61,7 @@ def kill_port(port: int) -> None:
             ["powershell", "-NoProfile", "-Command", ps2],
             cwd=ROOT,
             check=False,
-            creationflags=_win_creationflags(hidden=True),
+            creationflags=_win_creationflags(hidden=True, detached=False),
         )
 
         # 3. Targeted python cleanup, limited to this repo path and app entry points.
@@ -72,7 +74,7 @@ def kill_port(port: int) -> None:
             ["powershell", "-NoProfile", "-Command", ps3],
             cwd=ROOT,
             check=False,
-            creationflags=_win_creationflags(hidden=True),
+            creationflags=_win_creationflags(hidden=True, detached=False),
         )
     else:
         subprocess.run(
@@ -80,6 +82,52 @@ def kill_port(port: int) -> None:
             cwd=ROOT,
             check=False,
         )
+
+
+def build_frontend() -> bool:
+    """Rebuild frontend/dist so restart picks up UI changes."""
+    frontend = ROOT / "frontend"
+    if not (frontend / "package.json").exists():
+        return False
+
+    npm = shutil.which("npm")
+    if not npm and sys.platform == "win32":
+        win_npm = Path(r"C:\Program Files\nodejs\npm.cmd")
+        if win_npm.exists():
+            npm = str(win_npm)
+
+    if not npm:
+        _log("npm not found — skipping frontend build")
+        return False
+
+    _log("building frontend…")
+    env = os.environ.copy()
+    if sys.platform == "win32":
+        node_dir = r"C:\Program Files\nodejs"
+        if Path(node_dir).exists():
+            env["PATH"] = node_dir + os.pathsep + env.get("PATH", "")
+
+    result = subprocess.run(
+        [npm, "run", "build"],
+        cwd=frontend,
+        env=env,
+        capture_output=True,
+        text=True,
+        creationflags=_win_creationflags(hidden=True, detached=False),
+    )
+    if result.returncode != 0:
+        tail = (result.stderr or result.stdout or "").strip()[-800:]
+        _log(f"frontend build failed (exit {result.returncode}): {tail}")
+        return False
+
+    _log("frontend build ok")
+    return True
+
+
+def _log(msg: str) -> None:
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with LOG_FILE.open("a", encoding="utf-8") as f:
+        f.write(f"[restart] {msg}\n")
 
 
 def start_server(hidden: bool = True) -> None:
@@ -94,7 +142,7 @@ def start_server(hidden: bool = True) -> None:
         "stderr": subprocess.STDOUT,
     }
     if hidden:
-        kwargs["creationflags"] = _win_creationflags(hidden=True)
+        kwargs["creationflags"] = _win_creationflags(hidden=True, detached=True)
 
     subprocess.Popen([sys.executable, "run.py"], **kwargs)
 
@@ -109,7 +157,7 @@ def _port_in_use(port: int) -> bool:
                 cwd=ROOT,
                 capture_output=True,
                 text=True,
-                creationflags=_win_creationflags(hidden=True),
+                creationflags=_win_creationflags(hidden=True, detached=False),
             )
             count = int((out.stdout or "0").strip())
             return count > 0
@@ -122,17 +170,26 @@ def _port_in_use(port: int) -> bool:
         except Exception:
             return True
 
+def _wait_for_port_free(port: int, attempts: int = 20, delay_s: float = 0.5) -> bool:
+    for _ in range(attempts):
+        if not _port_in_use(port):
+            return True
+        kill_port(port)
+        time.sleep(delay_s)
+    return not _port_in_use(port)
+
+
 def main() -> None:
     time.sleep(0.3)
     kill_port(PORT)
+    _wait_for_port_free(PORT)
 
-    # Be patient: the old listener can take a moment to release the port on Windows.
-    # Re-kill and wait up to ~6 seconds total.
-    for i in range(6):
-        time.sleep(0.8)
-        if not _port_in_use(PORT):
-            break
-        kill_port(PORT)
+    build_frontend()
+
+    # Port can linger on Windows; kill again after the build before starting.
+    kill_port(PORT)
+    if not _wait_for_port_free(PORT, attempts=24, delay_s=0.5):
+        _log(f"port {PORT} still in use after kill — starting anyway")
 
     start_server(hidden=True)
 

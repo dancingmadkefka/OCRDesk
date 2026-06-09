@@ -1,4 +1,4 @@
-# Start the OCR Benchmark server
+# Start the OCRDesk server
 # Double-click this file from File Explorer.
 # It will open a console window (you can minimize it immediately). 
 # Close the window when you want to stop the server.
@@ -6,7 +6,7 @@
 $ErrorActionPreference = "SilentlyContinue"
 Set-Location $PSScriptRoot
 
-Write-Host "=== OCR Benchmark starter ==="
+Write-Host "=== OCRDesk starter ==="
 Write-Host "Killing any previous server on port 8877 (so we get the latest code)..."
 
 # Kill only listeners on the exact local port (netstat is reliable)

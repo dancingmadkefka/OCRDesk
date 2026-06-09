@@ -54,44 +54,60 @@ export default function Settings() {
     }
   }
 
-  if (!settings) return <div className="loading">Loading…</div>;
+  if (!settings) return <div className="loading">Loading settings…</div>;
+
+  const keyBadge = (isSet: boolean) => (
+    <span className={`key-badge ${isSet ? "set" : "unset"}`}>{isSet ? "Configured" : "Not set"}</span>
+  );
+
+  // Collapse the long run of bullets from the masked preview (e.g. "sk-1••••••••3xyz").
+  const shortPreview = (p: string) => p.replace(/•{2,}/g, "••••");
 
   return (
     <div className="page settings-page">
       <div className="page-header">
+        <p className="dash-eyebrow">Configuration</p>
         <h1>Settings</h1>
-        <p className="subtitle">Configure image folder, API keys, and defaults</p>
+        <p className="subtitle">Image folder, API keys, and batch defaults.</p>
       </div>
 
       <form className="settings-form panel" onSubmit={handleSave}>
         <fieldset>
           <legend>Image folder</legend>
+          <p className="fieldset-desc">
+            Folder containing your <code>*.ocr_ready.jpg</code> source images.
+          </p>
           <label>
-            Path to folder containing <code>*.ocr_ready.jpg</code> files
+            Folder path
             <input
               type="text"
               value={form.images_dir}
               onChange={(e) => setForm({ ...form, images_dir: e.target.value })}
               className="wide"
+              placeholder="C:\\path\\to\\images"
             />
           </label>
         </fieldset>
 
         <fieldset>
-          <legend>LM Studio</legend>
+          <legend>
+            LM Studio {keyBadge(settings.lm_studio_key_set)}
+          </legend>
+          <p className="fieldset-desc">Local model server for running OCR without cloud APIs.</p>
           <label>
             API URL
             <input
               type="text"
               value={form.lm_studio_url}
               onChange={(e) => setForm({ ...form, lm_studio_url: e.target.value })}
+              placeholder="http://localhost:1234/v1"
             />
           </label>
           <label>
-            API key {settings.lm_studio_key_set && <span className="dim">(configured)</span>}
+            API key
             <input
               type="password"
-              placeholder="Leave blank to keep current"
+              placeholder={settings.lm_studio_key_set ? "•••••• — leave blank to keep current" : "Optional"}
               value={form.lm_studio_key}
               onChange={(e) => setForm({ ...form, lm_studio_key: e.target.value })}
             />
@@ -99,15 +115,17 @@ export default function Settings() {
         </fieldset>
 
         <fieldset>
-          <legend>OpenAI</legend>
+          <legend>
+            OpenAI {keyBadge(settings.openai_api_key_set)}
+          </legend>
           <label>
             API key{" "}
-            {settings.openai_api_key_set && (
-              <span className="dim">({settings.openai_api_key_preview})</span>
+            {settings.openai_api_key_set && settings.openai_api_key_preview && (
+              <span className="dim mono">· current {shortPreview(settings.openai_api_key_preview)}</span>
             )}
             <input
               type="password"
-              placeholder="Leave blank to keep current"
+              placeholder={settings.openai_api_key_set ? "Leave blank to keep current" : "sk-…"}
               value={form.openai_api_key}
               onChange={(e) => setForm({ ...form, openai_api_key: e.target.value })}
             />
@@ -118,20 +136,23 @@ export default function Settings() {
               type="text"
               value={form.default_openai_model}
               onChange={(e) => setForm({ ...form, default_openai_model: e.target.value })}
+              placeholder="gpt-4o"
             />
           </label>
         </fieldset>
 
         <fieldset>
-          <legend>Anthropic</legend>
+          <legend>
+            Anthropic {keyBadge(settings.anthropic_api_key_set)}
+          </legend>
           <label>
             API key{" "}
-            {settings.anthropic_api_key_set && (
-              <span className="dim">({settings.anthropic_api_key_preview})</span>
+            {settings.anthropic_api_key_set && settings.anthropic_api_key_preview && (
+              <span className="dim mono">· current {shortPreview(settings.anthropic_api_key_preview)}</span>
             )}
             <input
               type="password"
-              placeholder="Leave blank to keep current"
+              placeholder={settings.anthropic_api_key_set ? "Leave blank to keep current" : "sk-ant-…"}
               value={form.anthropic_api_key}
               onChange={(e) => setForm({ ...form, anthropic_api_key: e.target.value })}
             />
@@ -142,20 +163,23 @@ export default function Settings() {
               type="text"
               value={form.default_anthropic_model}
               onChange={(e) => setForm({ ...form, default_anthropic_model: e.target.value })}
+              placeholder="claude-sonnet-4-20250514"
             />
           </label>
         </fieldset>
 
         <fieldset>
           <legend>Batch OCR</legend>
+          <p className="fieldset-desc">Pause between API calls when running OCR on multiple documents.</p>
           <label>
-            Delay between API calls (seconds)
+            Delay between calls (seconds)
             <input
               type="number"
               min={0}
               step={0.5}
               value={form.ocr_delay_seconds}
               onChange={(e) => setForm({ ...form, ocr_delay_seconds: parseFloat(e.target.value) })}
+              style={{ maxWidth: 160 }}
             />
           </label>
         </fieldset>
@@ -166,7 +190,7 @@ export default function Settings() {
           <button type="submit" className="btn primary">
             Save settings
           </button>
-          {saved && <span className="saved-msg">Saved</span>}
+          {saved && <span className="saved-msg">✓ Saved</span>}
         </div>
       </form>
     </div>

@@ -62,6 +62,23 @@ class BackendSafetyTests(unittest.TestCase):
             self.assertEqual(out["model"], "gpt-4o")
             run_ocr.assert_not_called()
 
+    def test_update_result_creates_new_refined_variant(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            images_dir = Path(tmp)
+            (images_dir / "doc.ocr_ready.jpg").write_bytes(b"fake")
+
+            with patch("backend.server._images_dir", return_value=images_dir):
+                out = server.update_result(
+                    "doc",
+                    "model-refined-test",
+                    server.SaveHtmlRequest(html="<html><body>ok</body></html>"),
+                )
+
+            saved = ocr_core.result_path(images_dir, "doc", "model-refined-test")
+            self.assertEqual(out["model"], "model-refined-test")
+            self.assertTrue(saved.exists())
+            self.assertIn("ok", saved.read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

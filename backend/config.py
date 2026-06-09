@@ -1,4 +1,4 @@
-"""Persistent settings for the OCR benchmark app."""
+"""Persistent settings for OCRDesk."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-DEFAULT_IMAGES_DIR = Path(r"C:\Users\daniel\OneDrive\Pictures\benchmark\final")
+DEFAULT_IMAGES_DIR = Path(__file__).resolve().parent.parent / "images"
 DEFAULT_LM_URL = "http://localhost:1234/v1"
 DEFAULT_LM_KEY = "lm-studio"
 
@@ -15,8 +15,15 @@ SETTINGS_PATH = Path(__file__).resolve().parent.parent / "settings.json"
 
 
 def _defaults() -> dict[str, Any]:
+    images_dir = (
+        os.getenv("OCRDESK_IMAGES_DIR")
+        or os.getenv("READLOOP_IMAGES_DIR")
+        or os.getenv("GLYPHAUDIT_IMAGES_DIR")
+        or os.getenv("OCR_BENCHMARK_IMAGES_DIR")
+        or str(DEFAULT_IMAGES_DIR)
+    )
     return {
-        "images_dir": str(DEFAULT_IMAGES_DIR),
+        "images_dir": images_dir,
         "lm_studio_url": os.getenv("LM_STUDIO_URL", DEFAULT_LM_URL),
         "lm_studio_key": os.getenv("LM_STUDIO_KEY", DEFAULT_LM_KEY),
         "openai_api_key": os.getenv("OPENAI_API_KEY", ""),

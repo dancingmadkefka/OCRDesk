@@ -4,6 +4,8 @@ import { api, type ImageDetail } from "../api";
 import ComparePane, { type ViewOption } from "../components/ComparePane";
 import OcrPanel from "../components/OcrPanel";
 import RefinementPanel from "../components/RefinementPanel";
+import RestartServerButton from "../components/RestartServerButton";
+import { displayStem } from "../stemUtils";
 
 import { stripFences } from "../htmlUtils";
 
@@ -20,23 +22,25 @@ export default function Workspace() {
   const [showManual, setShowManual] = useState(false);
   const [manualText, setManualText] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const [railOpen, setRailOpen] = useState(true);
 
-  // Refinement session
   const [refineOpen, setRefineOpen] = useState(false);
   const [refineBaseModel, setRefineBaseModel] = useState<string | null>(null);
   const [refineInitialHtml, setRefineInitialHtml] = useState<string>("");
 
-  const load = useCallback(() => {
-    if (!stem) return;
-    api
+  const load = useCallback((preferredRight?: string) => {
+    if (!stem) return Promise.resolve();
+    return api
       .getImage(stem)
       .then((d) => {
         setDetail(d);
-        if (d.ground_truth) {
-          setRightView("ground-truth");
-        } else if (d.models.length) {
-          setRightView(d.models[0]);
-        }
+        const keys = ["image", ...(d.ground_truth ? ["ground-truth"] : []), ...d.models];
+        const fallback = d.ground_truth ? "ground-truth" : d.models[0] || "image";
+        setRightView((cur) => {
+          if (preferredRight && keys.includes(preferredRight)) return preferredRight;
+          if (cur === "image") return fallback;
+          return keys.includes(cur) ? cur : fallback;
+        });
       })
       .catch((e) => setError(e.message));
   }, [stem]);
@@ -48,6 +52,7 @@ export default function Workspace() {
     setZoom(1);
     setLeftView("image");
     setRightView("image");
+    setShowManual(false);
     load();
   }, [stem]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -59,27 +64,26 @@ export default function Workspace() {
 
   const viewOptions: ViewOption[] = useMemo(() => {
     if (!detail) return [];
-    const opts: ViewOption[] = [{ key: "image", label: "Original image", type: "image" }];
+    const opts: ViewOption[] = [{ key: "image", label: "Original image (photo)", type: "image" }];
     if (detail.ground_truth) {
       opts.push({
         key: "ground-truth",
-        label: `Ground truth (${detail.ground_truth.file})`,
+        label: `Ground truth: ${detail.ground_truth.file}`,
         type: "html",
         html: detail.ground_truth.html,
         raw: detail.ground_truth.raw,
         editable: true,
       });
-    } else {
-      for (const m of detail.models) {
-        opts.push({
-          key: m,
-          label: `Model: ${m}`,
-          type: "html",
-          html: detail.model_contents[m],
-          raw: detail.model_contents[m],
-          editable: true,
-        });
-      }
+    }
+    for (const m of detail.models) {
+      opts.push({
+        key: m,
+        label: `Candidate: ${m}`,
+        type: "html",
+        html: detail.model_contents[m],
+        raw: detail.model_contents[m],
+        editable: true,
+      });
     }
     return opts;
   }, [detail]);
@@ -87,18 +91,17 @@ export default function Workspace() {
   const handleSaveHtml = useCallback(
     async (key: string, html: string) => {
       if (!stem) return;
-      const hasGt = detail?.has_gt ?? false;
-      if (key === "ground-truth" || hasGt) {
+      if (key === "ground-truth") {
         const res = await api.saveGroundTruth(stem, html);
         setMessage(`Saved ${res.ground_truth}`);
+        await load("ground-truth");
       } else {
         await api.saveResult(stem, key, html);
-        const res = await api.saveGroundTruth(stem, html);
-        setMessage(`Saved and set as ground truth (${res.ground_truth})`);
+        setMessage(`Saved candidate ${key}`);
+        await load(key);
       }
-      await load();
     },
-    [stem, load, detail?.has_gt]
+    [stem, load]
   );
 
   useEffect(() => {
@@ -132,15 +135,31 @@ export default function Workspace() {
       }
       setShowManual(false);
       setManualText("");
-      await load();
+      await load(!detail?.has_gt ? "ground-truth" : undefined);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Save failed");
     }
   }
 
+  async function handleSetSelectedAsGroundTruth() {
+    if (!stem || !detail) return;
+    const selected = viewOptions.find((o) => o.key === rightView);
+    if (!selected || selected.type !== "html" || selected.key === "ground-truth") return;
+    try {
+      const html = stripFences(selected.raw ?? selected.html ?? "");
+      const res = await api.saveGroundTruth(stem, html);
+      setMessage(`Set ${selected.label.replace(/^Candidate:\s*/, "")} as ground truth (${res.ground_truth})`);
+      await load("ground-truth");
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Failed to set ground truth");
+    }
+  }
+
   function startRefinementFrom(modelKey: string) {
     if (!detail) return;
-    const content = detail.model_contents[modelKey] || (modelKey === "ground-truth" && detail.ground_truth ? detail.ground_truth.raw : "");
+    const content =
+      detail.model_contents[modelKey] ||
+      (modelKey === "ground-truth" && detail.ground_truth ? detail.ground_truth.raw : "");
     if (!content) return;
     setRefineBaseModel(modelKey);
     setRefineInitialHtml(content);
@@ -153,52 +172,58 @@ export default function Workspace() {
     const name = targetModelName || refineBaseModel || "refined";
     await api.saveResult(stem, name, html);
     setMessage(`Saved refined output as ${name}`);
-    // Close the panel and reload so the new variant appears in the compare dropdowns
     setRefineOpen(false);
     setRefineBaseModel(null);
     setRefineInitialHtml("");
-    await load();
+    await load(name);
   }
 
-  if (error) return <div className="error-banner">{error}</div>;
-  if (!detail || detail.stem !== stem) return <div className="loading">Loading…</div>;
+  if (error) return <div className="error-banner ws-error">{error}</div>;
+  if (!detail || detail.stem !== stem) return <div className="loading">Loading document…</div>;
+
+  const { title } = displayStem(detail.stem);
+  const canRefine = detail.models.length > 0 || detail.ground_truth;
+  const rightOption = viewOptions.find((o) => o.key === rightView);
+  const canSetRightAsGt = Boolean(rightOption?.type === "html" && rightView !== "ground-truth");
 
   return (
-    <div className={`workspace${refineOpen ? " workspace-refining" : ""}`}>
-      <div className="workspace-toolbar">
-        <div className="toolbar-left">
-          <Link to="/" className="btn ghost">
-            ← Dashboard
+    <div className={`workspace workspace-v2${refineOpen ? " refining" : ""}${railOpen ? " rail-open" : ""}`}>
+      <header className="ws-header">
+        <div className="ws-header-left">
+          <Link to="/" className="ws-back" title="Back to corpus">
+            ← Corpus
           </Link>
-          <div className="nav-cluster">
-            <button
-              className="btn icon"
-              disabled={!detail.prev_stem}
-              onClick={() => detail.prev_stem && navigate(`/workspace/${encodeURIComponent(detail.prev_stem)}`)}
-              title="Previous (←)"
-            >
-              ‹
-            </button>
-            <span className="nav-position">
-              <span className="mono">{detail.stem}</span>
-              <span className="dim">
-                {detail.index}/{detail.total}
-              </span>
+          <div className="ws-doc-meta">
+            <h1 className="ws-doc-title">{title}</h1>
+            <span className="ws-doc-progress">
+              {detail.index} / {detail.total}
+              {detail.has_gt && <span className="ws-verified-pill">Verified</span>}
             </span>
-            <button
-              className="btn icon"
-              disabled={!detail.next_stem}
-              onClick={() => detail.next_stem && navigate(`/workspace/${encodeURIComponent(detail.next_stem)}`)}
-              title="Next (→)"
-            >
-              ›
-            </button>
           </div>
         </div>
 
-        <div className="toolbar-center">
+        <div className="ws-header-center">
+          <button
+            className="btn icon"
+            disabled={!detail.prev_stem}
+            onClick={() => detail.prev_stem && navigate(`/workspace/${encodeURIComponent(detail.prev_stem)}`)}
+            title="Previous document (←)"
+          >
+            ‹
+          </button>
+          <button
+            className="btn icon"
+            disabled={!detail.next_stem}
+            onClick={() => detail.next_stem && navigate(`/workspace/${encodeURIComponent(detail.next_stem)}`)}
+            title="Next document (→)"
+          >
+            ›
+          </button>
+        </div>
+
+        <div className="ws-header-right">
           <label className="zoom-control">
-            Zoom
+            <span className="zoom-label">Zoom</span>
             <input
               type="range"
               min={0.5}
@@ -207,19 +232,11 @@ export default function Workspace() {
               value={zoom}
               onChange={(e) => setZoom(parseFloat(e.target.value))}
             />
-            <span>{Math.round(zoom * 100)}%</span>
+            <span className="zoom-value">{Math.round(zoom * 100)}%</span>
           </label>
-          <button className="btn small" onClick={() => setZoom(1)}>
-            Reset
-          </button>
+          <RestartServerButton />
         </div>
-
-        <div className="toolbar-right">
-          <button className="btn" onClick={() => setShowManual(!showManual)}>
-            Manual paste
-          </button>
-        </div>
-      </div>
+      </header>
 
       {message && (
         <div className="toast" role="status">
@@ -230,102 +247,137 @@ export default function Workspace() {
         </div>
       )}
 
-      {!refineOpen && (
-        <div className="workspace-actions">
-          <OcrPanel
-            stems={[stem]}
-            existingModelsByStem={detail ? { [stem]: detail.models } : undefined}
-            onComplete={load}
-            compact
+      <div className="ws-stage">
+        {refineOpen && refineBaseModel ? (
+          <RefinementPanel
+            stem={stem}
+            baseModel={refineBaseModel}
+            initialHtml={refineInitialHtml}
+            onClose={() => {
+              setRefineOpen(false);
+              setRefineBaseModel(null);
+              setRefineInitialHtml("");
+            }}
+            onAccept={handleRefineAccept}
+            onSaved={load}
           />
-          {detail && (detail.models.length > 0 || detail.ground_truth) && (
-            <button
-              className="btn accent"
-              style={{ marginLeft: 12 }}
-              onClick={() => {
-                let candidate = rightView;
-                if (candidate !== "ground-truth" && !detail.models.includes(candidate)) {
-                  candidate = detail.models[0] || "ground-truth";
-                }
-                startRefinementFrom(candidate);
-              }}
-              title="Compare original vs previous vs proposed HTML in a dedicated refinement view"
-            >
-              Refine / self-critique…
-            </button>
-          )}
-        </div>
-      )}
+        ) : (
+          <>
+            <div className="compare-container ws-compare">
+              <ComparePane
+                key={`${stem}-L`}
+                stem={stem}
+                side="L"
+                selected={leftView}
+                options={viewOptions}
+                onChange={setLeftView}
+                zoom={zoom}
+                onSave={handleSaveHtml}
+              />
+              <div className="pane-divider" />
+              <ComparePane
+                key={`${stem}-R`}
+                stem={stem}
+                side="R"
+                selected={rightView}
+                options={viewOptions}
+                onChange={setRightView}
+                zoom={zoom}
+                onSave={handleSaveHtml}
+              />
+            </div>
 
-      {showManual && (
-        <div className="manual-panel">
-          <p className="hint">
-            Paste HTML from ChatGPT, Gemini, etc. Markdown fences are stripped automatically.
-            {!detail.has_gt && " Saving will also create the ground truth."}
-          </p>
-          <textarea
-            value={manualText}
-            onChange={(e) => setManualText(e.target.value)}
-            placeholder="Paste OCR HTML here…"
-            rows={8}
-          />
-          <div className="manual-actions">
-            <button className="btn primary" onClick={handleManualSave}>
-              {detail.has_gt ? "Save as manual" : "Save as ground truth"}
-            </button>
-            <button className="btn ghost" onClick={() => setShowManual(false)}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+            <aside className={`ws-rail${railOpen ? " open" : ""}`}>
+              <button
+                type="button"
+                className="ws-rail-toggle"
+                onClick={() => setRailOpen((v) => !v)}
+                aria-expanded={railOpen}
+                title={railOpen ? "Collapse actions" : "Expand actions"}
+              >
+                {railOpen ? "›" : "‹"}
+                <span className="ws-rail-toggle-label">Actions</span>
+              </button>
 
-      {refineOpen && refineBaseModel ? (
-        <RefinementPanel
-          stem={stem}
-          baseModel={refineBaseModel}
-          initialHtml={refineInitialHtml}
-          onClose={() => {
-            setRefineOpen(false);
-            setRefineBaseModel(null);
-            setRefineInitialHtml("");
-          }}
-          onAccept={handleRefineAccept}
-          onSaved={load}
-        />
-      ) : (
-      <div className="compare-container">
-        <ComparePane
-          key={`${stem}-L`}
-          stem={stem}
-          side="L"
-          selected={leftView}
-          options={viewOptions}
-          onChange={setLeftView}
-          zoom={zoom}
-          onSave={handleSaveHtml}
-        />
-        <div className="pane-divider" />
-        <ComparePane
-          key={`${stem}-R`}
-          stem={stem}
-          side="R"
-          selected={rightView}
-          options={viewOptions}
-          onChange={setRightView}
-          zoom={zoom}
-          onSave={handleSaveHtml}
-        />
+              {railOpen && (
+                <div className="ws-rail-body">
+                  <p className="ws-rail-heading">Run &amp; refine</p>
+                  <OcrPanel
+                    stems={[stem]}
+                    existingModelsByStem={detail ? { [stem]: detail.models } : undefined}
+                    onComplete={load}
+                    compact
+                  />
+
+                  <div className="ws-gt-status">
+                    <p className="ws-gt-title">{detail.has_gt ? "Ground truth set" : "No ground truth yet"}</p>
+                    <p className="ws-gt-copy">
+                      {detail.ground_truth
+                        ? detail.ground_truth.file
+                        : "Dropdown candidates are model outputs until one is explicitly set as GT."}
+                    </p>
+                  </div>
+
+                  <button
+                    className="btn primary ws-rail-btn"
+                    onClick={handleSetSelectedAsGroundTruth}
+                    disabled={!canSetRightAsGt}
+                    title={
+                      canSetRightAsGt
+                        ? "Copy the selected right-pane candidate into the ground truth file"
+                        : "Select a candidate in the right pane first"
+                    }
+                  >
+                    Set selected as ground truth
+                  </button>
+
+                  {canRefine && (
+                    <button
+                      className="btn accent ws-rail-btn"
+                      onClick={() => {
+                        let candidate = rightView;
+                        if (candidate !== "ground-truth" && !detail.models.includes(candidate)) {
+                          candidate = detail.models[0] || "ground-truth";
+                        }
+                        startRefinementFrom(candidate);
+                      }}
+                    >
+                      Refine with AI critique
+                    </button>
+                  )}
+
+                  <button
+                    className={`btn ws-rail-btn${showManual ? " accent" : ""}`}
+                    onClick={() => setShowManual((v) => !v)}
+                  >
+                    {showManual ? "Hide paste panel" : "Paste HTML manually"}
+                  </button>
+
+                  {showManual && (
+                    <div className="ws-rail-manual">
+                      <textarea
+                        value={manualText}
+                        onChange={(e) => setManualText(e.target.value)}
+                        placeholder="Paste OCR HTML…"
+                        rows={6}
+                      />
+                      <div className="manual-actions">
+                        <button className="btn primary" onClick={handleManualSave}>
+                          {detail.has_gt ? "Save" : "Save as ground truth"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="ws-rail-hint">
+                    Edit HTML in the right pane and save. Use <kbd>←</kbd> <kbd>→</kbd> to switch documents.
+                  </p>
+                </div>
+              )}
+            </aside>
+          </>
+        )}
       </div>
-      )}
-
-      {!refineOpen && (
-        <div className="workspace-hint">
-          {detail.has_gt
-            ? "Edit the ground truth HTML directly — Save updates the ground truth file."
-            : "Edit a model result and Save — it becomes the ground truth. Arrow keys navigate between images."}
-        </div>
-      )}
     </div>
   );
 }

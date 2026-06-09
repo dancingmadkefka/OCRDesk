@@ -1,4 +1,4 @@
-"""Core OCR benchmark logic — shared by API server."""
+"""Core OCR audit logic shared by the API server."""
 
 from __future__ import annotations
 
@@ -83,6 +83,7 @@ Changelog (required for every response — place AFTER the HTML or after [[SATIS
 - Fields: "area" (short, e.g. "totals row", "header"), "change" (what was wrong/fixed or "verified correct"), "reason" (evidence from the image).
 - If satisfied: list what you checked and why it is already correct (same JSON format).
 - If you made corrections: list every meaningful fix with its reason.
+- If user feedback is provided: every numbered feedback item must be acknowledged in the JSON, either with the correction made or with a concrete reason you did not change it.
 
 Rules (same as original OCR):
 - Reproduce all visible text exactly; preserve typos, casing, visible ASCII only on thermal/dot-matrix.
@@ -193,6 +194,9 @@ def build_feedback_block(feedbacks: list[dict[str, str | dict]] | None) -> str:
         lines.append(
             "Orange numbered boxes on the render screenshot mark flagged areas (box number matches item number below)."
         )
+    lines.append(
+        "For every numbered item, either make the targeted correction or explicitly say in the improvements JSON why no change was needed."
+    )
     for i, fb in enumerate(feedbacks, 1):
         excerpt = (fb.get("excerpt") or "").strip() if isinstance(fb.get("excerpt"), str) else ""
         comment = (fb.get("comment") or "").strip() if isinstance(fb.get("comment"), str) else ""

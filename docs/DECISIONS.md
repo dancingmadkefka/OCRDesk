@@ -1,12 +1,12 @@
 # Design decisions and reasoning
 
-This document records **why** the OCR benchmark app works the way it does: prompt rules, ground truth conventions, compare UI, and boundaries between “document content” and “app presentation.” It is meant for future you (or another agent) starting a fresh conversation without re-deriving these choices.
+This document records **why** OCRDesk works the way it does: prompt rules, ground truth conventions, compare UI, and boundaries between “document content” and “app presentation.” It is meant for future maintainers or agents starting a fresh conversation without re-deriving these choices.
 
 ---
 
 ## What this project is
 
-A **browser-based benchmark** for vision-language OCR—not a CLI wrapper. You compare model HTML output against document photos and human-curated ground truth (GT) across a fixed corpus (~35 images in `benchmark/final`, `*.ocr_ready.jpg`).
+A **browser-based audit and benchmark workspace** for vision-language OCR, not a CLI wrapper. You compare model HTML output against document photos and human-curated ground truth (GT) across a local corpus of `*.ocr_ready.jpg` images.
 
 **Stack:** FastAPI (`backend/`) serves API + built `frontend/dist`; React workspace for side-by-side review, batch OCR, and inline GT editing.
 

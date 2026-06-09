@@ -1,13 +1,18 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { api, type Summary } from "../api";
 import OcrPanel from "../components/OcrPanel";
+import { displayStem } from "../stemUtils";
+
+type StatusFilter = "all" | "todo" | "done";
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState("");
+  const [status, setStatus] = useState<StatusFilter>("all");
 
   const load = useCallback(() => {
     api
@@ -20,17 +25,18 @@ export default function Dashboard() {
     load();
   }, [load]);
 
-  const filtered = summary?.images.filter((img) =>
-    img.stem.toLowerCase().includes(filter.toLowerCase())
-  );
+  const filtered = useMemo(() => {
+    if (!summary) return [];
+    return summary.images.filter((img) => {
+      if (status === "todo" && img.has_gt) return false;
+      if (status === "done" && !img.has_gt) return false;
+      const q = filter.toLowerCase();
+      return img.stem.toLowerCase().includes(q) || displayStem(img.stem).title.toLowerCase().includes(q);
+    });
+  }, [summary, filter, status]);
 
-  function toggleAll(checked: boolean) {
-    if (!filtered) return;
-    if (checked) setSelected(new Set(filtered.map((i) => i.stem)));
-    else setSelected(new Set());
-  }
-
-  function toggleOne(stem: string) {
+  function toggleOne(stem: string, e: React.MouseEvent) {
+    e.stopPropagation();
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(stem)) next.delete(stem);
@@ -43,7 +49,8 @@ export default function Dashboard() {
     return (
       <div className="page">
         <div className="error-banner">
-          {error}
+          <strong>Couldn't load documents</strong>
+          <span>{error}</span>
           <p className="hint">
             Check the image folder path in <Link to="/settings">Settings</Link>.
           </p>
@@ -52,135 +59,177 @@ export default function Dashboard() {
     );
   }
 
-  if (!summary) return <div className="loading">Loading…</div>;
+  if (!summary) return <div className="loading">Loading corpus…</div>;
 
   const models = Object.keys(summary.model_coverage).sort();
+  const pct = summary.total ? Math.round((summary.gt_count / summary.total) * 100) : 0;
+  const ringStyle = { "--ring-pct": `${pct * 3.6}deg` } as React.CSSProperties;
 
   return (
-    <div className="page dashboard">
-      <div className="page-header">
-        <h1>Document Corpus</h1>
-        <p className="subtitle">{summary.total} images · benchmark folder</p>
-      </div>
+    <div className="page dashboard-v2">
+      <header className="dash-hero">
+        <div className="dash-hero-copy">
+          <p className="dash-eyebrow">Document corpus</p>
+          <h1>Audit OCR against real documents</h1>
+          <p className="dash-lead">
+            {summary.total} scanned documents in your corpus. Open any card to compare model output, ground truth, and
+            the original image side by side.
+          </p>
+        </div>
 
-      <div className="stats-grid">
-        <div className="stat-card">
-          <span className="stat-value">{summary.gt_count}</span>
-          <span className="stat-label">Ground truths</span>
-        </div>
-        <div className="stat-card accent">
-          <span className="stat-value">{summary.remaining_gt}</span>
-          <span className="stat-label">Remaining</span>
-        </div>
-        <div className="stat-card wide">
-          <span className="stat-label">Model coverage</span>
-          {models.length === 0 ? (
-            <span className="dim">No results yet</span>
-          ) : (
-            <div className="coverage-bars">
-              {models.map((m) => (
-                <div key={m} className="coverage-row">
-                  <span className="mono coverage-name">{m}</span>
-                  <div className="coverage-track">
-                    <div
-                      className="coverage-fill"
-                      style={{ width: `${(summary.model_coverage[m] / summary.total) * 100}%` }}
-                    />
-                  </div>
-                  <span className="coverage-count">
-                    {summary.model_coverage[m]}/{summary.total}
-                  </span>
-                </div>
-              ))}
+        <div className="dash-hero-stats">
+          <div className="progress-ring" style={ringStyle} aria-label={`${pct}% verified`}>
+            <div className="progress-ring-inner">
+              <span className="progress-ring-value">{pct}%</span>
+              <span className="progress-ring-label">verified</span>
             </div>
-          )}
+          </div>
+          <div className="dash-stat-pills">
+            <div className="dash-stat-pill ok">
+              <span className="dash-stat-num">{summary.gt_count}</span>
+              <span className="dash-stat-cap">ground truths</span>
+            </div>
+            <div className="dash-stat-pill warn">
+              <span className="dash-stat-num">{summary.remaining_gt}</span>
+              <span className="dash-stat-cap">to verify</span>
+            </div>
+          </div>
         </div>
-      </div>
+      </header>
 
-      <div className="panel">
-        <div className="panel-toolbar">
+      {models.length > 0 && (
+        <section className="dash-coverage">
+          <h2 className="dash-section-title">Model coverage</h2>
+          <div className="coverage-bars">
+            {models.map((m) => (
+              <div key={m} className="coverage-row">
+                <span className="mono coverage-name" title={m}>
+                  {m}
+                </span>
+                <div className="coverage-track">
+                  <div
+                    className="coverage-fill"
+                    style={{ width: `${(summary.model_coverage[m] / summary.total) * 100}%` }}
+                  />
+                </div>
+                <span className="coverage-count">
+                  {summary.model_coverage[m]}/{summary.total}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="dash-catalog">
+        <div className="dash-toolbar">
           <input
             type="search"
-            placeholder="Filter by stem…"
+            placeholder="Search documents…"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             className="search-input"
           />
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={filtered?.length ? selected.size === filtered.length : false}
-              onChange={(e) => toggleAll(e.target.checked)}
+          <div className="filter-chips" role="tablist" aria-label="Filter by status">
+            <button
+              type="button"
+              className={`filter-chip${status === "all" ? " active" : ""}`}
+              onClick={() => setStatus("all")}
+            >
+              All <span className="chip-count">{summary.total}</span>
+            </button>
+            <button
+              type="button"
+              className={`filter-chip${status === "todo" ? " active" : ""}`}
+              onClick={() => setStatus("todo")}
+            >
+              Needs review <span className="chip-count">{summary.remaining_gt}</span>
+            </button>
+            <button
+              type="button"
+              className={`filter-chip${status === "done" ? " active" : ""}`}
+              onClick={() => setStatus("done")}
+            >
+              Verified <span className="chip-count">{summary.gt_count}</span>
+            </button>
+          </div>
+          <span className="result-count">{filtered.length} documents</span>
+        </div>
+
+        {filtered.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-icon">{summary.total === 0 ? "📁" : "🔍"}</div>
+            <h3>{summary.total === 0 ? "No documents found" : "No matches"}</h3>
+            <p>
+              {summary.total === 0 ? (
+                <>
+                  Check the image folder in <Link to="/settings">Settings</Link>.
+                </>
+              ) : (
+                "Try a different search or filter."
+              )}
+            </p>
+          </div>
+        ) : (
+          <div className="doc-grid">
+            {filtered.map((img) => {
+              const { title, hash } = displayStem(img.stem);
+              const isSelected = selected.has(img.stem);
+              return (
+                <article
+                  key={img.stem}
+                  className={`doc-card${isSelected ? " selected" : ""}${img.has_gt ? " verified" : " pending"}`}
+                  onClick={() => navigate(`/workspace/${encodeURIComponent(img.stem)}`)}
+                >
+                  <div className="doc-card-media">
+                    <img src={api.imageUrl(img.stem)} alt="" loading="lazy" />
+                    <label className="doc-card-check" onClick={(e) => toggleOne(img.stem, e)}>
+                      <input type="checkbox" checked={isSelected} readOnly tabIndex={-1} />
+                    </label>
+                    <span className={`doc-card-badge${img.has_gt ? " ok" : " pending"}`}>
+                      {img.has_gt ? "Verified" : "Needs review"}
+                    </span>
+                  </div>
+                  <div className="doc-card-body">
+                    <h3 className="doc-card-title">{title}</h3>
+                    {hash && <span className="doc-card-id mono">{hash}</span>}
+                    <div className="doc-card-tags">
+                      {img.models.length ? (
+                        img.models.map((m) => (
+                          <span key={m} className="tag">
+                            {m}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="dim">No OCR runs yet</span>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {selected.size > 0 && (
+        <div className="batch-dock" role="region" aria-label="Batch actions">
+          <div className="batch-dock-inner">
+            <span className="batch-dock-count">{selected.size} selected</span>
+            <OcrPanel
+              stems={[...selected]}
+              existingModelsByStem={Object.fromEntries(
+                summary.images.filter((img) => selected.has(img.stem)).map((img) => [img.stem, img.models])
+              )}
+              onComplete={load}
+              compact
             />
-            Select all visible
-          </label>
+            <button type="button" className="btn ghost" onClick={() => setSelected(new Set())}>
+              Clear
+            </button>
+          </div>
         </div>
-
-        <OcrPanel
-          stems={[...selected]}
-          existingModelsByStem={Object.fromEntries(
-            (summary?.images ?? [])
-              .filter((img) => selected.has(img.stem))
-              .map((img) => [img.stem, img.models])
-          )}
-          onComplete={load}
-        />
-
-        <div className="table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th className="col-check" />
-                <th>#</th>
-                <th>Stem</th>
-                <th>GT</th>
-                <th>Model results</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {filtered?.map((img, i) => (
-                <tr key={img.stem} className={selected.has(img.stem) ? "selected" : ""}>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={selected.has(img.stem)}
-                      onChange={() => toggleOne(img.stem)}
-                    />
-                  </td>
-                  <td className="dim">{i + 1}</td>
-                  <td className="mono stem-cell">{img.stem}</td>
-                  <td>
-                    {img.has_gt ? (
-                      <span className="badge ok" title={img.gt_file || ""}>
-                        ✓
-                      </span>
-                    ) : (
-                      <span className="badge dim">—</span>
-                    )}
-                  </td>
-                  <td className="models-cell">
-                    {img.models.length ? (
-                      img.models.map((m) => (
-                        <span key={m} className="tag">
-                          {m}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="dim">—</span>
-                    )}
-                  </td>
-                  <td>
-                    <Link to={`/workspace/${encodeURIComponent(img.stem)}`} className="btn small">
-                      Open
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

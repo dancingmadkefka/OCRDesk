@@ -13,6 +13,7 @@ export interface RefinementIteration {
   id: number;
   satisfied: boolean;
   html: string;
+  beforeHtml?: string;
   note?: string;
   improvements: RefineImprovement[];
   feedbacksUsed: FeedbackItem[];
@@ -20,6 +21,13 @@ export interface RefinementIteration {
 }
 
 type AnnotateTarget = "proposed" | "before" | null;
+
+interface HiddenProposal {
+  html: string;
+  beforeHtml: string;
+  improvements: RefineImprovement[];
+  raw?: string;
+}
 
 interface Props {
   stem: string;
@@ -44,6 +52,10 @@ function looksLikeHtml(text: string): boolean {
   const s = stripFences(text).trim();
   if (s.length < 24) return false;
   return /<!DOCTYPE\s+html|<html[\s>]|<body[\s>]|<table[\s>]|<div[\s>]|<p[\s>]|<h[1-6][\s>]/i.test(s);
+}
+
+function normalizeHtmlForCompare(html: string): string {
+  return stripFences(html).replace(/\s+/g, " ").trim();
 }
 
 async function compressDataUrl(dataUrl: string, maxWidth = 1200, quality = 0.82): Promise<string> {
@@ -213,12 +225,15 @@ async function renderHtmlToCanvas(html: string): Promise<{ canvas: HTMLCanvasEle
   const iframe = document.createElement("iframe");
   iframe.style.cssText = `position:fixed;left:-99999px;top:0;width:${RENDER_SHOT_WIDTH}px;height:1600px`;
   iframe.setAttribute("sandbox", "allow-same-origin");
+  const loaded = new Promise<void>((resolve) => {
+    iframe.onload = () => resolve();
+    window.setTimeout(resolve, 300);
+  });
   document.body.appendChild(iframe);
+  iframe.srcdoc = wrapped;
+  await loaded;
+  await new Promise((r) => setTimeout(r, 80));
   const idoc = iframe.contentDocument!;
-  idoc.open();
-  idoc.write(wrapped);
-  idoc.close();
-  await new Promise((r) => setTimeout(r, 120));
   const target = idoc.body || idoc.documentElement;
   const canvas = await html2canvas(target as HTMLElement, {
     backgroundColor: "#ffffff",
@@ -374,6 +389,7 @@ export default function RefinementPanel({
   const [workingHtml, setWorkingHtml] = useState(seed);
   const [beforeHtml, setBeforeHtml] = useState(seed);
   const [proposedHtml, setProposedHtml] = useState<string | null>(null);
+  const [hiddenProposal, setHiddenProposal] = useState<HiddenProposal | null>(null);
 
   const [iterations, setIterations] = useState<RefinementIteration[]>([]);
   const [feedbacks, setFeedbacks] = useState<FeedbackItem[]>([]);
@@ -391,6 +407,7 @@ export default function RefinementPanel({
   const [lastRaw, setLastRaw] = useState<string | undefined>();
   const [parseError, setParseError] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
 
@@ -460,6 +477,62 @@ export default function RefinementPanel({
     setFeedbacks((prev) => prev.filter((_, i) => i !== idx));
   }
 
+  function stashCurrentProposal() {
+    if (!proposedHtml) return;
+    setHiddenProposal({
+      html: proposedHtml,
+      beforeHtml,
+      improvements,
+      raw: lastRaw,
+    });
+  }
+
+  function restoreHiddenProposal() {
+    if (!hiddenProposal) return;
+    setBeforeHtml(hiddenProposal.beforeHtml);
+    setProposedHtml(hiddenProposal.html);
+    setImprovements(hiddenProposal.improvements);
+    setLastRaw(hiddenProposal.raw);
+    setCritiqueRan(true);
+    setSatisfied(false);
+    setSatisfiedNote(undefined);
+    setParseError(undefined);
+    setError(null);
+    setNotice(null);
+    setHiddenProposal(null);
+  }
+
+  function restoreIteration(it: RefinementIteration) {
+    setImprovements(it.improvements ?? []);
+    setCritiqueRan(true);
+    setHiddenProposal(null);
+    if (it.beforeHtml) setBeforeHtml(it.beforeHtml);
+    if (it.html) {
+      setProposedHtml(it.html);
+      setSatisfied(false);
+      setSatisfiedNote(undefined);
+      setParseError(undefined);
+      setError(null);
+      setNotice(null);
+      return;
+    }
+    if (it.satisfied) {
+      setSatisfied(true);
+      setSatisfiedNote(it.note);
+      setProposedHtml(null);
+      setParseError(undefined);
+      setError(null);
+      setNotice(null);
+      return;
+    }
+    setProposedHtml(null);
+    setSatisfied(false);
+    setSatisfiedNote(undefined);
+    setParseError(it.note);
+    setError(it.note || null);
+    setNotice(null);
+  }
+
   async function captureScreenshot() {
     setCapturing(true);
     setError(null);
@@ -480,18 +553,20 @@ export default function RefinementPanel({
   }
 
   async function runRefine() {
-    if (!workingHtml.trim()) return;
+    const sentHtml = proposedHtml || workingHtml;
+    if (!sentHtml.trim()) return;
     setRunning(true);
     setError(null);
+    setNotice(null);
     setParseError(undefined);
     setSatisfied(false);
     setSatisfiedNote(undefined);
+    stashCurrentProposal();
     setProposedHtml(null);
     setImprovements([]);
     setAnnotateTarget(null);
     setShowRaw(false);
 
-    const sentHtml = workingHtml;
     setBeforeHtml(sentHtml);
 
     try {
@@ -524,12 +599,14 @@ export default function RefinementPanel({
         setSatisfiedNote(note);
         setImprovements(resImprovements);
         setFeedbacks([]);
+        setHiddenProposal(null);
         setIterations((prev) => [
           ...prev,
           {
             id: (prev[prev.length - 1]?.id ?? 0) + 1,
             satisfied: true,
             html: "",
+            beforeHtml: sentHtml,
             note,
             improvements: resImprovements,
             feedbacksUsed: [...feedbacks],
@@ -553,6 +630,7 @@ export default function RefinementPanel({
             id: (prev[prev.length - 1]?.id ?? 0) + 1,
             satisfied: false,
             html: "",
+            beforeHtml: sentHtml,
             note: res.error || undefined,
             improvements: resImprovements,
             feedbacksUsed: [...feedbacks],
@@ -564,14 +642,21 @@ export default function RefinementPanel({
 
       setProposedHtml(produced);
       setImprovements(resImprovements);
+      setNotice(
+        normalizeHtmlForCompare(produced) === normalizeHtmlForCompare(sentHtml)
+          ? "The model returned HTML that matches the input it was given. Check the raw response or try a stronger correction/different model."
+          : null
+      );
       setFeedbacks([]);
       setScreenshotDataUrl(null);
+      setHiddenProposal(null);
       setIterations((prev) => [
         ...prev,
         {
           id: (prev[prev.length - 1]?.id ?? 0) + 1,
           satisfied: false,
           html: produced,
+          beforeHtml: sentHtml,
           improvements: resImprovements,
           feedbacksUsed: [...feedbacks],
           screenshotUsed: screenshotDataUrl,
@@ -593,6 +678,7 @@ export default function RefinementPanel({
     setWorkingHtml(seed);
     setBeforeHtml(seed);
     setProposedHtml(null);
+    setHiddenProposal(null);
     setIterations([]);
     setFeedbacks([]);
     setFreeNote("");
@@ -604,28 +690,78 @@ export default function RefinementPanel({
     setLastRaw(undefined);
     setParseError(undefined);
     setError(null);
+    setNotice(null);
     setAnnotateTarget(null);
   }
 
   function useProposedAsWorking() {
     if (!proposedHtml) return;
-    setWorkingHtml(proposedHtml);
+    const nextHtml = proposedHtml;
+    setWorkingHtml(nextHtml);
+    setBeforeHtml(nextHtml);
     setProposedHtml(null);
+    setHiddenProposal(null);
     setImprovements([]);
     setCritiqueRan(false);
+    setParseError(undefined);
+    setError(null);
+    setNotice(null);
+  }
+
+  function hideProposal() {
+    stashCurrentProposal();
+    setProposedHtml(null);
+    setImprovements([]);
+    setSatisfied(false);
+    setSatisfiedNote(undefined);
+    setNotice(null);
   }
 
   async function acceptHtml(html: string) {
     const name = `${safeName(baseModel)}-refined-${Date.now().toString(36)}`;
-    await onAccept(html, name);
-    onSaved?.();
+    setError(null);
+    try {
+      await onAccept(html, name);
+      onSaved?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save refined output");
+    }
   }
 
   const hasProposal = Boolean(proposedHtml);
+  const nextCritiqueHtml = proposedHtml || workingHtml;
+  const nextCritiqueSource = proposedHtml ? "Proposed" : "Current HTML";
   const beforeDoc = wrapForIframe(beforeHtml);
   const proposedDoc = proposedHtml ? wrapForIframe(proposedHtml) : "";
   const proposedAnnotateDoc = proposedHtml ? injectAnnotate(proposedHtml) : "";
   const beforeAnnotateDoc = injectAnnotate(beforeHtml);
+  const reviewState = running
+    ? "running"
+    : satisfied
+      ? "verified"
+      : hasProposal
+        ? "proposal"
+        : hiddenProposal
+          ? "hidden"
+          : parseError
+            ? "error"
+            : critiqueRan
+              ? "reviewed"
+              : "idle";
+  const reviewLabel =
+    reviewState === "running"
+      ? "Running"
+      : reviewState === "verified"
+        ? "Verified"
+        : reviewState === "proposal"
+          ? "Proposal ready"
+          : reviewState === "hidden"
+            ? "Proposal hidden"
+            : reviewState === "error"
+              ? "Needs attention"
+              : reviewState === "reviewed"
+                ? "No proposal"
+                : "Ready";
 
   function toggleAnnotate(target: "proposed" | "before") {
     setAnnotateTarget((cur) => (cur === target ? null : target));
@@ -635,7 +771,8 @@ export default function RefinementPanel({
     <div className="refine-overlay">
       <div className="refine-topbar">
         <div className="refine-topbar-left">
-          <span className="refine-title">Refine</span>
+          <span className="refine-title">Review</span>
+          <span className={`refine-state-pill state-${reviewState}`}>{reviewLabel}</span>
           <span className="refine-meta mono">
             {baseModel} · {stem}
           </span>
@@ -688,8 +825,8 @@ export default function RefinementPanel({
         </div>
 
         <div className="refine-topbar-actions">
-          <button className="btn small ghost" onClick={() => setShowAdvanced((v) => !v)} disabled={running}>
-            {showAdvanced ? "Hide advanced" : "Advanced"}
+          <button className="btn small ghost" onClick={() => setShowAdvanced(true)} disabled={running}>
+            Advanced
           </button>
           <button className="btn small ghost" onClick={resetAll} disabled={running}>
             Reset
@@ -700,242 +837,364 @@ export default function RefinementPanel({
         </div>
       </div>
 
-      <p className="refine-flow-hint">
-        Compare the three columns. If the proposal needs fixes, flag the problem area and add a note, then run critique
-        again. Accept when it matches the original.
-      </p>
+      {error && (
+        <div className="refine-system-banner refine-system-error">
+          <span>{error}</span>
+          {lastRaw && (
+            <button
+              type="button"
+              className="btn small ghost"
+              onClick={() => {
+                setShowAdvanced(true);
+                setShowRaw(true);
+              }}
+            >
+              Raw response
+            </button>
+          )}
+        </div>
+      )}
 
-      {error && <div className="refine-error">{error}</div>}
+      {notice && <div className="refine-system-banner refine-system-note">{notice}</div>}
 
       {satisfied && (
-        <div className="refine-banner refine-banner-ok">
-          Model says this version is good enough.
+        <div className="refine-system-banner refine-system-ok">
+          <span>Model says this version is good enough.</span>
           {satisfiedNote && <span className="refine-banner-note"> {satisfiedNote}</span>}
-          <button className="btn small" style={{ marginLeft: 12 }} onClick={() => acceptHtml(beforeHtml)}>
+          <button className="btn small" onClick={() => acceptHtml(beforeHtml)}>
             Save this version
           </button>
         </div>
       )}
 
       {annotateTarget && (
-        <div className="refine-annotate-hint">
-          Drag boxes on <strong>{annotateTarget}</strong> to flag problem areas — each drag adds a note (the VLM also
-          gets numbered boxes on the render shot). Add comments below, then click the button again when done.
+        <div className="refine-system-banner refine-system-note">
+          <span>
+            Flagging <strong>{annotateTarget}</strong>
+          </span>
           {feedbacks.length > 0 && (
             <span className="refine-annotate-count">
-              {" "}
               {feedbacks.length} flag{feedbacks.length === 1 ? "" : "s"} so far
             </span>
           )}
         </div>
       )}
 
-      <div className="refine-compare">
-        <CompareColumn label="Original" sublabel="source photo" variant="original">
-          <div
-            className="refine-preview-scroll"
-            style={{ transform: `scale(${zoom})`, transformOrigin: "top center" }}
-          >
-            <img src={api.imageUrl(stem)} alt="Original document" className="refine-doc-image" />
-          </div>
-        </CompareColumn>
-
-        <CompareColumn
-          label="Before"
-          sublabel={hasProposal ? "what you sent" : "starting HTML"}
-          variant="before"
-          annotating={annotateTarget === "before"}
-        >
-          <iframe
-            key={annotateTarget === "before" ? "before-annotate" : "before-view"}
-            className="refine-preview-frame"
-            srcDoc={annotateTarget === "before" ? beforeAnnotateDoc : beforeDoc}
-            sandbox={annotateTarget === "before" ? "allow-same-origin allow-scripts" : "allow-same-origin"}
-            title="Before"
-          />
-        </CompareColumn>
-
-        <CompareColumn
-          label="Proposed"
-          sublabel={hasProposal ? "model revision" : "appears after critique"}
-          variant="proposed"
-          annotating={annotateTarget === "proposed"}
-        >
-          {hasProposal ? (
-            <iframe
-              key={annotateTarget === "proposed" ? `prop-a-${proposedHtml!.length}` : `prop-${proposedHtml!.length}`}
-              className="refine-preview-frame"
-              srcDoc={annotateTarget === "proposed" ? proposedAnnotateDoc : proposedDoc}
-              sandbox={annotateTarget === "proposed" ? "allow-same-origin allow-scripts" : "allow-same-origin"}
-              title="Proposed"
-            />
-          ) : (
-            <div className="refine-placeholder">
-              <p>Run critique to fill this column with the model&apos;s revision.</p>
-            </div>
-          )}
-        </CompareColumn>
-      </div>
-
-      <ChangelogSection
-        items={improvements}
-        satisfied={satisfied}
-        critiqueRan={critiqueRan}
-        onShowRaw={lastRaw ? () => { setShowAdvanced(true); setShowRaw(true); } : undefined}
-      />
-
-      <div className="refine-feedback-panel">
-        <div className="refine-section-label">Corrections for next critique run</div>
-        <p className="refine-feedback-hint">
-          These notes are sent with the next run. Flagged areas auto-attach a render screenshot with numbered boxes for
-          the VLM. Cleared after each successful critique.
-        </p>
-        <div className="refine-feedback-row">
-          <input
-            className="refine-input"
-            placeholder="Describe what's still wrong (e.g. total should be 48.90)"
-            value={freeNote}
-            onChange={(e) => setFreeNote(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && addFreeNote()}
-            disabled={running}
-          />
-          <button className="btn small" onClick={addFreeNote} disabled={running || !freeNote.trim()}>
-            Add note
-          </button>
-        </div>
-
-        {feedbacks.length > 0 ? (
-          <div className="refine-feedback-list">
-            {feedbacks.map((fb, i) => (
-              <div key={i} className="refine-fb-chip">
-                <span className="refine-fb-num">{fb.bbox ? `#${i + 1}` : "•"}</span>
-                {fb.excerpt && (
-                  <span className="refine-fb-excerpt" title={fb.excerpt}>
-                    “{fb.excerpt.slice(0, 72)}
-                    {fb.excerpt.length > 72 ? "…" : ""}”
-                  </span>
-                )}
-                <input
-                  className="refine-fb-comment-input"
-                  placeholder="What's wrong here?"
-                  value={fb.comment || ""}
-                  onChange={(e) => updateFeedbackComment(i, e.target.value)}
-                  disabled={running}
-                />
-                <button type="button" className="refine-fb-x" onClick={() => removeFeedback(i)} aria-label="Remove">
-                  ×
-                </button>
+      <div className="refine-workbench">
+        <main className="refine-canvas">
+          <div className="refine-compare">
+            <CompareColumn label="Original" sublabel="source photo" variant="original">
+              <div
+                className="refine-preview-scroll"
+                style={{ transform: `scale(${zoom})`, transformOrigin: "top center" }}
+              >
+                <img src={api.imageUrl(stem)} alt="Original document" className="refine-doc-image" />
               </div>
-            ))}
+            </CompareColumn>
+
+            <CompareColumn
+              label="Before"
+              sublabel={hasProposal ? "what you sent" : "current HTML"}
+              variant="before"
+              annotating={annotateTarget === "before"}
+            >
+              <iframe
+                key={annotateTarget === "before" ? "before-annotate" : "before-view"}
+                className="refine-preview-frame"
+                srcDoc={annotateTarget === "before" ? beforeAnnotateDoc : beforeDoc}
+                sandbox={annotateTarget === "before" ? "allow-scripts" : "allow-same-origin"}
+                title="Before"
+              />
+            </CompareColumn>
+
+            <CompareColumn
+              label="Proposed"
+              sublabel={hasProposal ? "model revision" : hiddenProposal ? "hidden, restorable" : "after critique"}
+              variant="proposed"
+              annotating={annotateTarget === "proposed"}
+            >
+              {hasProposal ? (
+                <iframe
+                  key={
+                    annotateTarget === "proposed" ? `prop-a-${proposedHtml!.length}` : `prop-${proposedHtml!.length}`
+                  }
+                  className="refine-preview-frame"
+                  srcDoc={annotateTarget === "proposed" ? proposedAnnotateDoc : proposedDoc}
+                  sandbox={annotateTarget === "proposed" ? "allow-scripts" : "allow-same-origin"}
+                  title="Proposed"
+                />
+              ) : (
+                <div className={`refine-placeholder${hiddenProposal ? " refine-placeholder-recover" : ""}`}>
+                  <span className="refine-placeholder-icon" aria-hidden>
+                    {hiddenProposal ? "↺" : "◎"}
+                  </span>
+                  <p>{hiddenProposal ? "A hidden proposal is available." : "Run critique to generate a proposal."}</p>
+                  {hiddenProposal && (
+                    <button type="button" className="btn small" onClick={restoreHiddenProposal}>
+                      Restore proposal
+                    </button>
+                  )}
+                </div>
+              )}
+            </CompareColumn>
           </div>
-        ) : (
-          <p className="refine-feedback-empty">No notes yet — add one above or flag an area in Proposed.</p>
-        )}
+        </main>
+
+        <aside className="refine-inspector" aria-label="Review controls">
+          <section className="refine-card refine-status-card">
+            <div className="refine-card-header">
+              <div>
+                <div className="refine-section-label">Proposal</div>
+                <p className="refine-card-copy">
+                  {hasProposal
+                    ? "A model revision is visible in the Proposed column."
+                    : hiddenProposal
+                      ? "The last proposal is hidden, not deleted."
+                      : satisfied
+                        ? "The current version can be saved."
+                        : "No proposal is visible."}
+                </p>
+              </div>
+              <span className={`refine-state-dot state-${reviewState}`} aria-hidden />
+            </div>
+
+            <div className="refine-primary-actions">
+              {hasProposal && (
+                <>
+                  <button className="btn accent wide" onClick={() => acceptHtml(proposedHtml!)} disabled={running}>
+                    Accept proposed
+                  </button>
+                  <button
+                    className="btn wide"
+                    onClick={useProposedAsWorking}
+                    disabled={running}
+                    title="Copy proposed into the next critique input without saving"
+                  >
+                    Iterate on proposed
+                  </button>
+                  <button className="btn ghost wide" onClick={hideProposal} disabled={running}>
+                    Hide proposal
+                  </button>
+                </>
+              )}
+              {!hasProposal && hiddenProposal && (
+                <button className="btn wide" onClick={restoreHiddenProposal} disabled={running}>
+                  Restore hidden proposal
+                </button>
+              )}
+              {satisfied && (
+                <button className="btn accent wide" onClick={() => acceptHtml(beforeHtml)} disabled={running}>
+                  Save this version
+                </button>
+              )}
+              {lastRaw && (
+                <button
+                  type="button"
+                  className="btn ghost wide"
+                  onClick={() => {
+                    setShowAdvanced(true);
+                    setShowRaw(true);
+                  }}
+                >
+                  Open raw response
+                </button>
+              )}
+            </div>
+          </section>
+
+          <ChangelogSection
+            items={improvements}
+            satisfied={satisfied}
+            critiqueRan={critiqueRan}
+            onShowRaw={
+              lastRaw
+                ? () => {
+                    setShowAdvanced(true);
+                    setShowRaw(true);
+                  }
+                : undefined
+            }
+          />
+
+          <section className="refine-card refine-feedback-panel">
+            <div className="refine-section-label">Corrections</div>
+            <p className="refine-feedback-hint">
+              {feedbacks.length ? `${feedbacks.length} queued for the next run.` : "No corrections queued."}
+            </p>
+            <div className="refine-feedback-row">
+              <input
+                className="refine-input"
+                placeholder="Describe what's still wrong"
+                value={freeNote}
+                onChange={(e) => setFreeNote(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addFreeNote()}
+                disabled={running}
+              />
+              <button className="btn small" onClick={addFreeNote} disabled={running || !freeNote.trim()}>
+                Add
+              </button>
+            </div>
+
+            {feedbacks.length > 0 ? (
+              <div className="refine-feedback-list">
+                {feedbacks.map((fb, i) => (
+                  <div key={i} className="refine-fb-chip">
+                    <span className="refine-fb-num">{fb.bbox ? `#${i + 1}` : "•"}</span>
+                    {fb.excerpt && (
+                      <span className="refine-fb-excerpt" title={fb.excerpt}>
+                        “{fb.excerpt.slice(0, 72)}
+                        {fb.excerpt.length > 72 ? "…" : ""}”
+                      </span>
+                    )}
+                    <input
+                      className="refine-fb-comment-input"
+                      placeholder="What is wrong here?"
+                      value={fb.comment || ""}
+                      onChange={(e) => updateFeedbackComment(i, e.target.value)}
+                      disabled={running}
+                    />
+                    <button
+                      type="button"
+                      className="refine-fb-x"
+                      onClick={() => removeFeedback(i)}
+                      aria-label="Remove"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="refine-feedback-empty">Add a note or flag an area.</p>
+            )}
+          </section>
+
+          <section className="refine-card refine-run-panel">
+            <div className="refine-section-label">Run</div>
+            <p className="refine-feedback-hint">
+              Next critique uses <strong>{nextCritiqueSource}</strong>.
+            </p>
+            <div className="refine-button-stack">
+              <button className="btn primary wide" onClick={runRefine} disabled={running || !nextCritiqueHtml.trim()}>
+                {running ? "Running…" : hasProposal ? "Re-run critique" : "Run critique"}
+              </button>
+              <button className="btn wide" onClick={captureScreenshot} disabled={capturing || running}>
+                {capturing ? "Capturing…" : screenshotDataUrl ? "Recapture render shot" : "Attach render shot"}
+              </button>
+              {screenshotDataUrl && (
+                <button className="btn ghost wide" onClick={() => setScreenshotDataUrl(null)} disabled={running}>
+                  Clear render shot
+                </button>
+              )}
+            </div>
+
+            <div className="refine-flag-actions">
+              <button
+                type="button"
+                className={`btn small${annotateTarget === "proposed" ? " accent" : ""}`}
+                onClick={() => toggleAnnotate("proposed")}
+                disabled={running || !hasProposal}
+              >
+                {annotateTarget === "proposed" ? "Done flagging proposed" : "Flag proposed"}
+              </button>
+              <button
+                type="button"
+                className={`btn small ghost${annotateTarget === "before" ? " accent" : ""}`}
+                onClick={() => toggleAnnotate("before")}
+                disabled={running}
+              >
+                {annotateTarget === "before" ? "Done flagging before" : "Flag before"}
+              </button>
+            </div>
+            {screenshotDataUrl && <span className="tag refine-shot-tag">render shot attached</span>}
+          </section>
+
+          {iterations.length > 0 && (
+            <section className="refine-card refine-history-panel">
+              <div className="refine-section-label">History</div>
+              <div className="refine-history-list">
+                {iterations.map((it) => (
+                  <button
+                    key={it.id}
+                    type="button"
+                    className="refine-history-item"
+                    onClick={() => restoreIteration(it)}
+                  >
+                    <span className="refine-history-run">#{it.id}</span>
+                    <span className="refine-history-kind">
+                      {it.satisfied ? "Verified" : it.html ? "Proposal" : "No HTML"}
+                    </span>
+                    <span className="refine-history-meta">
+                      {it.feedbacksUsed.length
+                        ? `${it.feedbacksUsed.length} correction${it.feedbacksUsed.length === 1 ? "" : "s"}`
+                        : "No corrections"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+        </aside>
       </div>
-
-      <div className="refine-actionbar">
-        <div className="refine-actionbar-left">
-          <button className="btn primary" onClick={runRefine} disabled={running || !workingHtml.trim()}>
-            {running ? "Running…" : hasProposal ? "Re-run critique" : "Run critique"}
-          </button>
-          <button className="btn small" onClick={captureScreenshot} disabled={capturing || running}>
-            {capturing ? "Capturing…" : screenshotDataUrl ? "Recapture shot" : "Attach render shot"}
-          </button>
-          {screenshotDataUrl && (
-            <button className="btn small ghost" onClick={() => setScreenshotDataUrl(null)} disabled={running}>
-              Clear shot
-            </button>
-          )}
-          {hasProposal && (
-            <button
-              type="button"
-              className={`btn small${annotateTarget === "proposed" ? " accent" : ""}`}
-              onClick={() => toggleAnnotate("proposed")}
-              disabled={running}
-            >
-              {annotateTarget === "proposed" ? "Done flagging" : "Flag areas in Proposed"}
-            </button>
-          )}
-          <button
-            type="button"
-            className={`btn small ghost${annotateTarget === "before" ? " accent" : ""}`}
-            onClick={() => toggleAnnotate("before")}
-            disabled={running}
-          >
-            {annotateTarget === "before" ? "Done flagging" : "Flag areas in Before"}
-          </button>
-          {screenshotDataUrl && <span className="tag">screenshot attached</span>}
-        </div>
-
-        <div className="refine-actionbar-right">
-          {hasProposal && (
-            <>
-              <button className="btn accent" onClick={() => acceptHtml(proposedHtml!)} disabled={running}>
-                Accept proposed
-              </button>
-              <button className="btn" onClick={useProposedAsWorking} disabled={running} title="Copy proposed into the next critique input without saving">
-                Iterate on proposed
-              </button>
-              <button className="btn ghost" onClick={() => { setProposedHtml(null); setImprovements([]); }} disabled={running}>
-                Dismiss
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {iterations.length > 0 && (
-        <div className="refine-history-bar">
-          <span className="dim">Past runs:</span>
-          {iterations.map((it) => (
-            <button
-              key={it.id}
-              type="button"
-              className="refine-iter"
-              onClick={() => {
-                setImprovements(it.improvements ?? []);
-                setCritiqueRan(true);
-                if (it.html) {
-                  setProposedHtml(it.html);
-                  setSatisfied(false);
-                  setSatisfiedNote(undefined);
-                } else if (it.satisfied) {
-                  setSatisfied(true);
-                  setSatisfiedNote(it.note);
-                  setProposedHtml(null);
-                }
-              }}
-            >
-              #{it.id} {it.satisfied ? "ok" : "proposed"}
-            </button>
-          ))}
-        </div>
-      )}
 
       {showAdvanced && (
-        <div className="refine-advanced">
-          <div className="refine-advanced-section">
-            <div className="refine-section-label">HTML sent on next critique</div>
-            <p className="refine-feedback-hint">
-              Power-user edit only. Normally use &quot;Iterate on proposed&quot; instead of editing raw HTML.
-            </p>
-            <textarea
-              className="refine-textarea"
-              value={workingHtml}
-              onChange={(e) => setWorkingHtml(e.target.value)}
-              spellCheck={false}
-              disabled={running}
-            />
-          </div>
-          {lastRaw && (
-            <div className="refine-advanced-section">
-              <button type="button" className="btn small ghost" onClick={() => setShowRaw((v) => !v)}>
-                {showRaw ? "Hide raw model response" : "Show raw model response"}
+        <div
+          className="refine-modal-backdrop"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.currentTarget === e.target) setShowAdvanced(false);
+          }}
+        >
+          <div className="refine-advanced-modal" role="dialog" aria-modal="true" aria-label="Advanced review tools">
+            <div className="refine-advanced-header">
+              <div>
+                <div className="refine-section-label">Advanced</div>
+                <h2>HTML and raw model output</h2>
+              </div>
+              <button type="button" className="btn small" onClick={() => setShowAdvanced(false)}>
+                Close
               </button>
-              {parseError && <div className="refine-parse-error">{parseError}</div>}
-              {showRaw && <textarea className="refine-raw-text" readOnly value={lastRaw} spellCheck={false} />}
             </div>
-          )}
+
+            {parseError && <div className="refine-parse-error">{parseError}</div>}
+
+            <div className="refine-advanced-grid">
+              <div className="refine-advanced-section">
+                <div className="refine-section-label">HTML sent on next critique: {nextCritiqueSource}</div>
+                <textarea
+                  className="refine-textarea"
+                  value={nextCritiqueHtml}
+                  onChange={(e) => {
+                    if (proposedHtml) {
+                      setProposedHtml(e.target.value);
+                    } else {
+                      setWorkingHtml(e.target.value);
+                    }
+                  }}
+                  spellCheck={false}
+                  disabled={running}
+                />
+              </div>
+
+              <div className="refine-advanced-section">
+                <div className="refine-advanced-section-head">
+                  <div className="refine-section-label">Raw model response</div>
+                  {lastRaw && (
+                    <button type="button" className="btn small ghost" onClick={() => setShowRaw((v) => !v)}>
+                      {showRaw ? "Hide" : "Show"}
+                    </button>
+                  )}
+                </div>
+                {lastRaw && showRaw ? (
+                  <textarea className="refine-raw-text" readOnly value={lastRaw} spellCheck={false} />
+                ) : (
+                  <div className="refine-raw-empty">
+                    {lastRaw ? "Raw response is hidden." : "No raw response yet."}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

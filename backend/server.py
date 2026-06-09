@@ -37,7 +37,7 @@ from backend.ocr_core import (
 
 ROOT = Path(__file__).resolve().parent.parent
 
-app = FastAPI(title="OCR Benchmark")
+app = FastAPI(title="OCRDesk")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -112,7 +112,7 @@ def restart_server():
     subprocess.Popen(
         [sys.executable, str(helper)],
         cwd=ROOT,
-        creationflags=_win_creationflags(hidden=True),
+        creationflags=_win_creationflags(hidden=True, detached=True),
     )
     return {"status": "restarting"}
 
@@ -353,8 +353,6 @@ class SaveHtmlRequest(BaseModel):
 def update_result(stem: str, model: str, body: SaveHtmlRequest):
     images_dir = _images_dir()
     _require_image_stem(images_dir, stem)
-    if model not in list_results(images_dir, stem):
-        raise HTTPException(404, f"Result not found: {model}")
     content = strip_fences(body.html)
     out = save_result(images_dir, stem, model, content)
     return {"model": model, "path": str(out)}
@@ -466,7 +464,10 @@ FRONTEND_INDEX = FRONTEND_DIST / "index.html"
 def _spa_index():
     if not FRONTEND_INDEX.exists():
         raise HTTPException(404)
-    return FileResponse(FRONTEND_INDEX)
+    return FileResponse(
+        FRONTEND_INDEX,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 if FRONTEND_DIST.is_dir():
