@@ -24,6 +24,7 @@ from backend.ocr_core import (
     image_summary,
     list_images,
     list_results,
+    mime_of,
     parse_refine_response,
     promote_to_gt,
     read_gt_content,
@@ -192,7 +193,8 @@ def get_image_detail(stem: str):
 def serve_image(stem: str):
     images_dir = _images_dir()
     images = _require_image_stem(images_dir, stem)
-    return FileResponse(images[stem], media_type="image/jpeg")
+    img_path = images[stem]
+    return FileResponse(img_path, media_type=mime_of(img_path))
 
 
 # ── OCR jobs ──────────────────────────────────────────────────────────────────

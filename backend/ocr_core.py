@@ -111,8 +111,13 @@ def list_images(images_dir: Path) -> list[tuple[str, Path]]:
     out: list[tuple[str, Path]] = []
     if not images_dir.is_dir():
         return out
-    for p in sorted(images_dir.glob("*.ocr_ready.jpg")):
-        stem = p.name.replace(".ocr_ready.jpg", "")
+    for p in sorted(images_dir.iterdir()):
+        if not p.is_file():
+            continue
+        m = re.match(r"^(.+)\.ocr_ready\.(jpg|jpeg|png|webp)$", p.name, re.I)
+        if not m:
+            continue
+        stem = m.group(1)
         out.append((stem, p))
     return out
 
