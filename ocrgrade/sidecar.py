@@ -139,15 +139,24 @@ def load_or_default(case_id: str, corpus_dir_or_case_files: "Path | CaseFiles") 
     sidecar_path = getattr(corpus_dir_or_case_files, "sidecar_path", None)
     if sidecar_path is not None:
         if sidecar_path.is_file():
-            return load(sidecar_path)
+            return _load_for_case(sidecar_path, case_id)
         return default_sidecar(case_id)
 
     directory = corpus_dir_or_case_files
     assert isinstance(directory, Path), "expected a CaseFiles-like object or a Path"
     candidates = sorted(directory.glob("*.meta.json")) if directory.is_dir() else []
     if candidates:
-        return load(candidates[0])
+        return _load_for_case(candidates[0], case_id)
     return default_sidecar(case_id)
+
+
+def _load_for_case(path: Path, case_id: str) -> Sidecar:
+    """A sidecar copied from another case would score this case's GT under the wrong id and
+    overwrite that case's result file, so its case_id must match the case it sits beside."""
+    loaded = load(path)
+    if loaded.case_id != case_id:
+        raise ValueError(f"sidecar {path} belongs to case {loaded.case_id!r}, not {case_id!r}")
+    return loaded
 
 
 def derive(
@@ -157,6 +166,7 @@ def derive(
     *,
     build_document=None,
     role_map=None,
+    corpus_roles: bytes | None = None,
 ) -> Sidecar:
     """Derive a schema-v1 sidecar from GT html plus an optional manifest entry.
 
@@ -204,6 +214,7 @@ def derive(
         confirmed=False,
         notes="",
         annotator_fingerprint=annotator_fingerprint(),
+        derivation_fingerprint=derivation_fingerprint(gt_html, corpus_roles),
     )
 
 
@@ -223,6 +234,19 @@ def annotator_fingerprint() -> str:
         if path.is_file():
             digest.update(name.encode("utf-8"))
             digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
+
+
+def derivation_fingerprint(gt_html: str, corpus_roles: bytes | None) -> str:
+    """12 hex over everything a derived sidecar depends on: the grader build, the GT html and the
+    corpus-level roles.yaml (when present). `score` recomputes it per case; a mismatch on an
+    unconfirmed sidecar means its derived fields may no longer describe the GT."""
+    digest = hashlib.sha256()
+    digest.update(annotator_fingerprint().encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(gt_html.encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(corpus_roles or b"")
     return digest.hexdigest()[:12]
 
 
@@ -521,4 +545,5 @@ def _from_dict(data: dict[str, Any]) -> Sidecar:
         confirmed=data.get("confirmed", False),
         notes=data.get("notes", ""),
         annotator_fingerprint=data.get("annotator_fingerprint", ""),
+        derivation_fingerprint=data.get("derivation_fingerprint", ""),
     )

@@ -217,6 +217,31 @@ def _load_manifest(path: Path | None) -> dict[str, dict]:
     return {}
 
 
+def _corpus_roles_bytes(corpus_dir: Path | None) -> bytes | None:
+    """The corpus-level roles.yaml override, when the corpus has one."""
+    if corpus_dir is None:
+        return None
+    path = Path(corpus_dir) / "roles.yaml"
+    return path.read_bytes() if path.is_file() else None
+
+
+def _config_hash(corpus_dir: Path | None) -> dict[str, str]:
+    """What a run was scored with: the package roles.yaml, the corpus override when present, and
+    the grader build. `rank` merges summaries; these let a reader see when two runs were not
+    scored under the same configuration."""
+    import hashlib
+
+    package_roles = Path(sidecar.__file__).with_name("roles.yaml")
+    out = {
+        "roles_yaml": hashlib.sha256(package_roles.read_bytes()).hexdigest()[:12],
+        "annotator": sidecar.annotator_fingerprint(),
+    }
+    corpus_roles = _corpus_roles_bytes(corpus_dir)
+    if corpus_roles is not None:
+        out["corpus_roles_yaml"] = hashlib.sha256(corpus_roles).hexdigest()[:12]
+    return out
+
+
 def _cmd_annotate(args, *, build_document=None, load_role_map=None) -> int:
     corpus_dir: Path = args.corpus
     if not corpus_dir.is_dir():
@@ -233,6 +258,7 @@ def _cmd_annotate(args, *, build_document=None, load_role_map=None) -> int:
 
     manifest = _load_manifest(args.manifest)
     role_map = load_role_map(corpus_dir)
+    corpus_roles = _corpus_roles_bytes(corpus_dir)
 
     all_sidecars = []
     for case_files in case_files_list:
@@ -244,7 +270,8 @@ def _cmd_annotate(args, *, build_document=None, load_role_map=None) -> int:
         gt_html = case_files.gt_path.read_text(encoding="utf-8", errors="replace")
         manifest_entry = manifest.get(case_files.case_id, {})
         derived = sidecar.derive(
-            case_files.case_id, gt_html, manifest_entry, build_document=build_document, role_map=role_map
+            case_files.case_id, gt_html, manifest_entry, build_document=build_document, role_map=role_map,
+            corpus_roles=corpus_roles,
         )
         sidecar.save(derived, case_files.sidecar_path)
         all_sidecars.append(derived)
@@ -445,24 +472,28 @@ def _run_score_like(
         results.append(result)
         report.write_case_json(result, cases_out_dir / f"{result.case_id}.json")
 
-    current_fp = sidecar.annotator_fingerprint()
+    corpus_roles = _corpus_roles_bytes(role_map_source)
     stale = []
     for cf in case_files_list:
         if getattr(cf, "sidecar_path", None) is None or not cf.sidecar_path.is_file():
             continue
         sc = sidecar.load(cf.sidecar_path)
-        if not sc.confirmed and sc.annotator_fingerprint != current_fp:  # confirmed = human-checked, never stale
+        if sc.confirmed:
+            continue  # human-checked, never stale
+        gt_html = cf.gt_path.read_text(encoding="utf-8", errors="replace")
+        if sc.derivation_fingerprint != sidecar.derivation_fingerprint(gt_html, corpus_roles):
             stale.append(cf.case_id)
     if stale:
         shown = ", ".join(stale[:5]) + (", ..." if len(stale) > 5 else "")
         print(
-            f"warning: {len(stale)} unconfirmed sidecar(s) were annotated by a different grader build ({shown}); "
+            f"warning: {len(stale)} unconfirmed sidecar(s) no longer match their inputs or the grader build ({shown}); "
             "derived fields may be stale - re-run `ocrgrade annotate` (confirmed sidecars are kept)",
             file=sys.stderr,
         )
     run_meta_full = dict(run_meta)
     run_meta_full["run_id"] = resolved_run_id
     run_meta_full["stale_sidecars"] = len(stale)
+    run_meta_full["config_hash"] = _config_hash(role_map_source)
     summary = rollup(results, run_meta=run_meta_full)
     report.write_summary_json(summary, run_out_dir / "summary.json")
     report.write_leaderboard_csv([summary], run_out_dir / "leaderboard.csv")

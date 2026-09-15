@@ -274,13 +274,14 @@ would have kept:
   many printings in the hypothesis. The sidecar's `expected_multiplicity` is
   written for the reviewer's benefit and never read by `score`, so a sidecar
   annotated by an older tokenizer cannot skew the gate.
-- **Sidecars carry the grader build that derived them.** `annotate` stamps
-  `annotator_fingerprint` (a hash of the package source); `score` warns and
-  records `stale_sidecars` in `summary.json` when an unconfirmed sidecar was
-  annotated by a different build of the derivation modules (canonicalizer,
-  tables, tokenizer, roles); confirmed sidecars are human-checked and never
-  count as stale, and scoring-only changes do not move the fingerprint. The GT corpus was scored once against stale sidecars
-  before this guard existed and the numbers were wrong.
+- **Sidecars carry what derived them.** `annotate` stamps `annotator_fingerprint`
+  (the derivation modules: canonicalizer, tables, tokenizer, roles, sidecar)
+  and `derivation_fingerprint` (that build plus the GT html and the corpus
+  `roles.yaml`). `score` recomputes the second per case and warns, recording
+  `stale_sidecars` in `summary.json`, when an unconfirmed sidecar no longer
+  matches; confirmed sidecars are human-checked and never count as stale, and
+  scoring-only changes move neither fingerprint. The GT corpus was scored once
+  against stale sidecars before this guard existed and the numbers were wrong.
 
 - **A2 aligns a GT total the way A1 does.** A hypothesis "totals row" (total
   keyword or last numeric row) is the fast path; failing that, the value must
@@ -302,6 +303,26 @@ would have kept:
   critical field and every required section per case, and `confirm` copies
   the editable columns back. Derived columns stay read-only so a hand edit
   cannot drift from the GT html. (2026-09-15)
+
+- **Amounts compare as tokens, never as substrings.** A1 and A2 match a
+  critical amount by cents against the amount tokens of a cell or row, so
+  12.34 no longer "matches" 112.34 or -12.34. FIN-EM compares amounts on
+  cents and currency together (an absent currency is a wildcard, two stated
+  currencies must agree), so €12.34 read as £12.34 is an amount error while
+  a dropped symbol is not. (2026-09-15, Codex round 2)
+- **Repeated values are matched as multisets.** A5 (VAT letters), A8 and
+  `line_item_f1` (line items) consume a hypothesis occurrence once, so two
+  identical GT rows with one hypothesis row fail instead of reusing it.
+- **A nested table is scored once for TEDS.** The parent's TEDS html has
+  every nested `<table>` removed; the nested table is still its own entry.
+- **A sidecar must belong to its case.** `load_or_default` refuses a
+  `.meta.json` whose `case_id` differs from the folder's case; a copied sidecar
+  would otherwise score under the wrong id and overwrite that case's result.
+- **Every summary carries `config_hash`** (package `roles_yaml`, corpus
+  override, annotator build) so `rank` cannot merge runs scored under
+  different grader configurations without a visible trace.
+- **`CHF -12.34` keeps its currency.** A sign or accounting parenthesis
+  between a currency marker and the number no longer drops the marker.
 
 ## Open questions (not settled)
 

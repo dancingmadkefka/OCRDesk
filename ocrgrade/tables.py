@@ -20,7 +20,7 @@ from ocrgrade.roles import _TOTAL_KEYWORD_RE
 import unicodedata
 from typing import Any
 
-from bs4 import Comment, NavigableString, ProcessingInstruction, Tag
+from bs4 import BeautifulSoup, Comment, NavigableString, ProcessingInstruction, Tag
 
 from .fintoken import extract_tokens, with_cell_ref
 from .ir import Cell, CellRef, Table
@@ -219,8 +219,36 @@ def build_table(
     _apply_last_numeric_row_fallback(grid, n_rows, n_cols, class_matched, index)
 
     cells = [grid[key] for key in sorted(grid.keys())]
-    outer_html = str(table_el)
+    outer_html = _outer_html_for_teds(table_el)
     return Table(index=index, n_rows=n_rows, n_cols=n_cols, cells=cells, outer_html=outer_html)
+
+
+def _outer_html_for_teds(table_el: Tag) -> str:
+    """Serialize `table_el` for TEDS with every descendant `<table>` removed.
+
+    A cell that wraps a nested table keeps its own text; only the nested
+    table markup goes. Without this, a nested table's structure is scored
+    twice: once folded into its parent's `outer_html` and again as the
+    nested table's own `Table` entry (`canonicalize.build_document` walks
+    `body.find_all("table")`, which discovers both, and `teds_adapter.
+    teds_scores` pairs every discovered table by document order).
+
+    Reparses `table_el`'s own markup into a throwaway tree rather than
+    mutating `table_el` in place: canonicalize.py still walks the original
+    document (for every other table, and for line-item extraction) after
+    every table in it has been built, so the shared tree must stay intact.
+    A table with no nested table is returned unchanged, so
+    `outer_html == str(table_el)` continues to hold for the common case.
+    """
+    if table_el.find("table") is None:
+        return str(table_el)
+    clone_root = BeautifulSoup(str(table_el), "html5lib")
+    clone_table = clone_root.find("table")
+    if clone_table is None:  # pragma: no cover - defensive, table_el is always a <table>
+        return str(table_el)
+    for nested in clone_table.find_all("table"):
+        nested.decompose()
+    return str(clone_table)
 
 
 def _positive_int(value: Any, default: int) -> int:

@@ -57,10 +57,14 @@ metrics null) rather than an empty transcription error. Amounts keep their sign 
 prints twice must occur at least twice in the hypothesis; both sides are counted at score
 time with the same counter, and a cell's text stops at any table nested inside it, so a
 value inside a nested table is counted once. The sidecar's `expected_multiplicity` is written
-for the reviewer and never read by `score`. `annotate` stamps every sidecar with a fingerprint
-of the grader build; `score` warns and records `stale_sidecars` in `summary.json` when a
-unconfirmed sidecar was annotated by a different build of the derivation modules (re-run
-`annotate`; confirmed sidecars are kept and never count as stale). A TEDS timeout or a table beyond
+for the reviewer and never read by `score`. `annotate` stamps every sidecar with two fingerprints: the grader build that derived it
+(`annotator_fingerprint`, derivation modules only) and the inputs it was derived from
+(`derivation_fingerprint`: that build plus the GT html and the corpus-level `roles.yaml`
+when present). `score` warns and records `stale_sidecars` in `summary.json` when an
+unconfirmed sidecar no longer matches its inputs or the build (re-run `annotate`; confirmed
+sidecars are kept and never count as stale). Every `summary.json` also carries `config_hash`
+(package `roles_yaml`, `corpus_roles_yaml` when present, `annotator`), so runs scored under
+different grader configurations are not merged unnoticed. A TEDS timeout or a table beyond
 the cell cap makes the case CATASTROPHIC rather than a silent zero. Two cheap catastrophic
 detectors also run on every case: runaway or near-empty output (hypothesis text
 longer than 5x or shorter than 0.1x the GT text) and CER above 0.8; both give

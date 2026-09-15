@@ -356,14 +356,18 @@ def test_annotate_stamps_the_grader_build_and_score_reports_stale_sidecars(tmp_p
     assert cli.main(["score", "--corpus", str(corpus), "--hyp-dir", str(hyp_dir), "--out-dir", str(out), "--run-id", "fresh"]) == 0
     assert json.loads((out / "fresh" / "summary.json").read_text(encoding="utf-8"))["stale_sidecars"] == 0
 
-    meta["annotator_fingerprint"] = "0ld0ld0ld0ld"
-    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    (case / "doc.html").write_text(NESTED_GT + "<p>Amount due 1234.56</p>", encoding="utf-8")  # GT edited after annotate
     capsys.readouterr()
     assert cli.main(["score", "--corpus", str(corpus), "--hyp-dir", str(hyp_dir), "--out-dir", str(out), "--run-id", "stale"]) == 0
     assert json.loads((out / "stale" / "summary.json").read_text(encoding="utf-8"))["stale_sidecars"] == 1
-    assert "annotated by a different grader build (case-001)" in capsys.readouterr().err
+    assert "no longer match their inputs or the grader build (case-001)" in capsys.readouterr().err
+    assert cli.main(["annotate", "--corpus", str(corpus)]) == 0  # re-deriving from the edited GT clears it
+    assert cli.main(["score", "--corpus", str(corpus), "--hyp-dir", str(hyp_dir), "--out-dir", str(out), "--run-id", "fresh2"]) == 0
+    assert json.loads((out / "fresh2" / "summary.json").read_text(encoding="utf-8"))["stale_sidecars"] == 0
 
-    meta["confirmed"] = True  # a human-checked sidecar is never stale, whatever build derived it
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["confirmed"] = True  # a human-checked sidecar is never stale, whatever derived it
+    meta["derivation_fingerprint"] = "0ld0ld0ld0ld"
     meta_path.write_text(json.dumps(meta), encoding="utf-8")
     assert cli.main(["score", "--corpus", str(corpus), "--hyp-dir", str(hyp_dir), "--out-dir", str(out), "--run-id", "confirmed"]) == 0
     assert json.loads((out / "confirmed" / "summary.json").read_text(encoding="utf-8"))["stale_sidecars"] == 0

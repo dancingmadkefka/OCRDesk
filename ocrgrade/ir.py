@@ -134,6 +134,8 @@ class Sidecar:
     confirmed: bool = False
     notes: str = ""
     annotator_fingerprint: str = ""  # grader build that derived the fields; "" = unknown
+    derivation_fingerprint: str = ""  # that build plus the GT html and corpus roles.yaml it was derived from
+    derivation_fingerprint: str = ""  # that build plus the GT html and corpus roles.yaml it was derived from
 
 
 @dataclass

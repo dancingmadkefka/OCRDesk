@@ -88,8 +88,22 @@ def _reading_order(words_gt: list[str], words_hyp: list[str]) -> tuple[float, bo
 
 def _fin_values(tokens: list[FinToken], fin_type: str) -> set:
     if fin_type == "amount":
-        return {t.cents for t in tokens if t.type == fin_type and t.cents is not None}
+        return {(t.cents, t.currency) for t in tokens if t.type == fin_type and t.cents is not None}
     return {t.canonical for t in tokens if t.type == fin_type and t.canonical is not None}
+
+
+def _amounts_compatible(a: tuple[int, str | None], b: tuple[int, str | None]) -> bool:
+    """Are two (cents, currency) amounts the same financial fact?
+
+    Cents must agree exactly. Currency must not contradict: a hypothesis that drops the
+    currency symbol is not an amount error (either side may be `None`), but one that states a
+    different currency -- turning EUR 12.34 into GBP 12.34 -- is, even though the cents match.
+    """
+    a_cents, a_currency = a
+    b_cents, b_currency = b
+    if a_cents != b_cents:
+        return False
+    return a_currency is None or b_currency is None or a_currency == b_currency
 
 
 def _fin_em(gt_tokens: list[FinToken], hyp_tokens: list[FinToken], fin_type: str) -> tuple[float, bool]:
@@ -99,7 +113,11 @@ def _fin_em(gt_tokens: list[FinToken], hyp_tokens: list[FinToken], fin_type: str
     if not gt_set:
         return 1.0, True
     hyp_set = _fin_values(hyp_tokens, fin_type)
-    return len(gt_set & hyp_set) / len(gt_set), False
+    if fin_type == "amount":
+        hits = sum(1 for g in gt_set if any(_amounts_compatible(g, h) for h in hyp_set))
+    else:
+        hits = len(gt_set & hyp_set)
+    return hits / len(gt_set), False
 
 
 def content_metrics(gt: Document, hyp: Document) -> dict:
@@ -153,11 +171,12 @@ def content_metrics(gt: Document, hyp: Document) -> dict:
     hyp_fin_str = "".join((t.canonical or "") for t in hyp.fin_tokens)
     cer_financial_tokens = Levenshtein.distance(gt_fin_str, hyp_fin_str) / max(1, len(gt_fin_str))
 
-    gt_amount_cents = {t.cents for t in gt.fin_tokens if t.type == "amount" and t.cents is not None}
-    hyp_amount_cents = {
-        t.cents for t in hyp.fin_tokens if t.type == "amount" and t.cents is not None
-    }
-    spurious_amounts = len(hyp_amount_cents - gt_amount_cents)
+    # Same (cents, currency) key and the same compatibility rule as the FIN-EM amount
+    # comparison above, so a currency-corrupted amount ('EUR 12.34' hypothesised as 'GBP
+    # 12.34') is flagged as spurious here too, not just missed by fin_em_amounts.
+    gt_amounts = _fin_values(gt.fin_tokens, "amount")
+    hyp_amounts = _fin_values(hyp.fin_tokens, "amount")
+    spurious_amounts = sum(1 for h in hyp_amounts if not any(_amounts_compatible(h, g) for g in gt_amounts))
 
     # content_score's weighted mean drops n/a terms from its weights instead
     # of crediting them at full weight: a letter with no amounts is scored

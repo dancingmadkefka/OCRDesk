@@ -74,19 +74,42 @@ def _cents_of(value: str) -> int | None:
     return amounts[0].cents if len(amounts) == 1 else None
 
 
+def _cell_amount_tokens(cell: Cell) -> list[FinToken]:
+    """Amount tokens belonging to a cell: its own pre-extracted `tokens` (the production path,
+    stamped by tables.py) plus a fresh parse of its text. The fresh parse means a cell built
+    without pre-extracted tokens -- any hand-built `Cell`, as in this module's unit tests --
+    is covered the same way a production one is, rather than silently matching nothing."""
+    from ocrgrade.fintoken import extract_tokens
+
+    pre = [t for t in cell.tokens if t.type == "amount" and t.cents is not None]
+    live = [t for t in extract_tokens(cell.text_norm) if t.type == "amount" and t.cents is not None]
+    return pre + live
+
+
 def _value_in_cell(value: str, cell: Cell) -> bool:
-    """True when the critical value is present in the cell: as whitespace-insensitive text,
-    as a token canonical, or as the same amount in cents (so '3637.00' matches '3,637.00',
-    "1'932.24" and '3637,00' alike). Locale formatting is never a placement error."""
+    """True when the critical value is present in the cell.
+
+    An amount-valued value (anything `_cents_of` can parse as a single amount) must match one
+    of the cell's own amount tokens by cents, or by canonical text -- never by raw substring,
+    so a wrong total such as '112.34' or '-12.34' can no longer satisfy a '12.34' critical
+    value merely because one string contains the other; sign matters, so '-12.34' does not
+    match '12.34' either. Locale formatting is still accepted as the same amount ('3637.00'
+    matches '3,637.00', "1'932.24" and '3637,00' alike, since those parse to identical cents --
+    that is normalization, not a placement error). A non-amount value (a reference id, a date,
+    a free-text label) still matches as whitespace-insensitive text or as a token canonical.
+    """
     v = _squash(value)
     if not v:
         return False
+    cents = _cents_of(value)
+    if cents is not None:
+        return any(
+            t.cents == cents or (t.canonical and _squash(t.canonical) == v)
+            for t in _cell_amount_tokens(cell)
+        )
     if v in _squash(cell.text_norm):
         return True
-    if any(_squash(t.canonical) == v for t in cell.tokens if t.canonical):
-        return True
-    cents = _cents_of(value)
-    return cents is not None and any(t.type == "amount" and t.cents == cents for t in cell.tokens)
+    return any(_squash(t.canonical) == v for t in cell.tokens if t.canonical)
 
 
 def _row_origin_cells(table: Table, row: int) -> list[Cell]:
@@ -356,6 +379,17 @@ def _cell_match_values(cell: Cell) -> list[str]:
     return [v for v in values if v.strip()]
 
 
+def _row_has_value(value: str, row_cells: list[Cell], row_text: str) -> bool:
+    """Does `value` occur in this hyp row? An amount-valued value must match one of the row's
+    cell amount tokens by cents -- never by raw substring, so a GT total of '12.34' cannot be
+    satisfied by a row that merely contains '112.34'. A non-amount value still matches as
+    whitespace-insensitive substring text."""
+    cents = _cents_of(value)
+    if cents is not None:
+        return any(t.cents == cents for c in row_cells for t in _cell_amount_tokens(c))
+    return _norm(value) in _norm(row_text)
+
+
 def _check_a2(gt: Document, hyp: Document) -> AssertionResult:
     total_cells = [
         c for t in gt.tables for c in t.cells
@@ -374,7 +408,7 @@ def _check_a2(gt: Document, hyp: Document) -> AssertionResult:
             for r in rows:
                 row_cells = [c for c in h_table.cells if c.row == r]
                 row_text = " ".join(c.text_norm for c in row_cells)
-                if not any(_norm(v) in _norm(row_text) for v in target_values):
+                if not any(_row_has_value(v, row_cells, row_text) for v in target_values):
                     continue
                 if _TOTAL_KEYWORD_RE.search(row_text) or r == last_num_row:
                     found = True
@@ -466,12 +500,21 @@ def _check_a5(gt: Document, hyp: Document) -> AssertionResult:
     # letter itself must also match: it carries the VAT rate, so "59.99 D"
     # reproduced as "59.99 E" (same cents, same adjacency) is a real content
     # error, not a mere adjacency question.
+    #
+    # GT tokens are matched against hyp tokens as a multiset on (cents, letter,
+    # attached): each matched hyp token is removed from its cents bucket so it
+    # cannot also satisfy a second, repeated GT occurrence. Two GT "59.99 A"
+    # tokens with only one attached "A" in the hypothesis therefore leave the
+    # second GT token with nothing left to match, and it fails like any other
+    # missing occurrence.
     failures: list[str] = []
     for gt_tok in gt_vat_tokens:
         candidates = hyp_vat_by_cents.get(gt_tok.cents, []) if gt_tok.cents is not None else []
         amount = f"{(gt_tok.cents or 0) / 100:.2f}"
         adjacency_matches = [h for h in candidates if h.attached == gt_tok.attached]
-        if any(h.vat_letter == gt_tok.vat_letter for h in adjacency_matches):
+        exact = next((h for h in adjacency_matches if h.vat_letter == gt_tok.vat_letter), None)
+        if exact is not None:
+            candidates.remove(exact)  # consume: a further identical GT occurrence can't reuse it
             continue
         wrong_letter = next((h for h in adjacency_matches if h.vat_letter != gt_tok.vat_letter), None)
         if wrong_letter is not None:
@@ -530,17 +573,26 @@ def _check_a7(gt: Document, hyp: Document) -> AssertionResult:
 # --- A8: line_item_intact ---------------------------------------------------------
 
 
-def _line_item_hit(item: LineItem, hyp: Document) -> bool:
+def _line_item_hit(item: LineItem, hyp: Document, claimed_rows: dict[int, set[int]]) -> bool:
+    """True when an unclaimed hyp row in `item`'s table holds every field value; that row's
+    (table, row) is then added to `claimed_rows` so a repeated GT row cannot also match it.
+
+    Without consuming rows this way, two identical GT line items would both independently find
+    (and reuse) the same single hyp row when the hypothesis dropped one of the repeats, hiding
+    the omission."""
     if item.table_index >= len(hyp.tables):
         return False
     hyp_table = hyp.tables[item.table_index]
     values = [_norm(v) for v in item.fields.values() if _norm(v)]
     if not values:
         return False
-    rows = {c.row for c in hyp_table.cells}
-    for r in rows:
+    claimed = claimed_rows.setdefault(item.table_index, set())
+    for r in sorted({c.row for c in hyp_table.cells}):
+        if r in claimed:
+            continue
         row_texts = [_norm(c.text_norm) for c in hyp_table.cells if c.row == r]
         if all(any(v in text for text in row_texts) for v in values):
+            claimed.add(r)
             return True
     return False
 
@@ -550,10 +602,11 @@ def _check_a8(gt: Document, hyp: Document) -> AssertionResult:
     if not items:
         return AssertionResult("A8", False, True, "no GT line items to check")
 
+    claimed_rows: dict[int, set[int]] = {}
     failures = [
         f"line item at table {it.table_index} row {it.row} {it.fields} not intact in hyp"
         for it in items
-        if not _line_item_hit(it, hyp)
+        if not _line_item_hit(it, hyp, claimed_rows)
     ]
     passed = not failures
     detail = "all line items intact" if passed else "; ".join(failures)

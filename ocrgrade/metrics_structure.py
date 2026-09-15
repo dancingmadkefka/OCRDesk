@@ -112,27 +112,37 @@ def _label_value_f1(
     return (2 * precision * recall) / max(EPS, precision + recall)
 
 
-def _line_item_hit(item: LineItem, hyp: Document) -> bool:
-    if item.table_index >= len(hyp.tables):
-        return False
-    hyp_table = hyp.tables[item.table_index]
-    values = [_norm(v) for v in item.fields.values() if _norm(v)]
-    if not values:
-        return False
-    rows = {c.row for c in hyp_table.cells}
-    for r in rows:
-        row_texts = [_norm(c.text_norm) for c in hyp_table.cells if c.row == r]
-        if all(any(v in text for text in row_texts) for v in values):
-            return True
-    return False
 
 
 def _line_item_f1(gt: Document, hyp: Document) -> float | None:
-    """Fraction of GT line-item tuples reproduced intact in one hyp row."""
+    """Fraction of GT line-item tuples reproduced intact in one hyp row.
+
+    Each hyp row is claimed by at most one GT item (consumed on match), so when the GT
+    contains two identical line-item rows and the hypothesis retains only one, only the first
+    GT item can claim it; the second finds every row already claimed or non-matching and
+    counts as a miss instead of reusing the same row a second time.
+    """
     gt_items = gt.line_items
     if not gt_items:
         return None
-    hits = sum(1 for item in gt_items if _line_item_hit(item, hyp))
+    claimed_rows: dict[int, set[int]] = {}
+    hits = 0
+    for item in gt_items:
+        if item.table_index >= len(hyp.tables):
+            continue
+        hyp_table = hyp.tables[item.table_index]
+        values = [_norm(v) for v in item.fields.values() if _norm(v)]
+        if not values:
+            continue
+        claimed = claimed_rows.setdefault(item.table_index, set())
+        for r in sorted({c.row for c in hyp_table.cells}):
+            if r in claimed:
+                continue
+            row_texts = [_norm(c.text_norm) for c in hyp_table.cells if c.row == r]
+            if all(any(v in text for text in row_texts) for v in values):
+                claimed.add(r)
+                hits += 1
+                break
     return hits / max(1, len(gt_items))
 
 

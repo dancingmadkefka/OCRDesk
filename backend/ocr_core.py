@@ -107,19 +107,30 @@ def results_dir(images_dir: Path) -> Path:
     return images_dir / "results"
 
 
+#: Preference when a stem has more than one accepted image variant on disk
+#: (e.g. `doc.ocr_ready.jpg` re-encoded alongside `doc.ocr_ready.png`):
+#: lower wins. Without this, list_images appended the same stem twice, which
+#: double-counted the document in image_summary and could make a detail
+#: page's next_stem equal to the current stem.
+_VARIANT_RANK = {"png": 0, "jpg": 1, "jpeg": 2, "webp": 3}
+
+
 def list_images(images_dir: Path) -> list[tuple[str, Path]]:
-    out: list[tuple[str, Path]] = []
     if not images_dir.is_dir():
-        return out
+        return []
+    best: dict[str, tuple[int, Path]] = {}
     for p in sorted(images_dir.iterdir()):
         if not p.is_file():
             continue
         m = re.match(r"^(.+)\.ocr_ready\.(jpg|jpeg|png|webp)$", p.name, re.I)
         if not m:
             continue
-        stem = m.group(1)
-        out.append((stem, p))
-    return out
+        stem, ext = m.group(1), m.group(2).lower()
+        rank = _VARIANT_RANK[ext]
+        current = best.get(stem)
+        if current is None or rank < current[0]:
+            best[stem] = (rank, p)
+    return [(stem, path) for stem, (_rank, path) in sorted(best.items())]
 
 
 def _gt_prefix(stem: str) -> str:

@@ -112,6 +112,42 @@ def _apply_sign(text: str, start: int, end: int) -> tuple[int, int, bool]:
     return start, end, False
 
 
+#: Longest markers first, so a 3-letter code is tried before either 1-char
+#: symbol could shadow part of it.
+_CURRENCY_MARKERS_BY_LEN = sorted(_CURRENCY_CANON, key=len, reverse=True)
+
+
+def _extend_currency_prefix(text: str, start: int) -> tuple[int, str | None]:
+    """Widen a sign/paren-widened amount span left over a currency marker.
+
+    `_AMOUNT_CORE_RE`'s own prefix alternative requires the currency to sit
+    immediately before the digits, so 'CHF -12.34' and 'EUR (12.34)' never
+    match it in one pass: the engine instead matches the bare number, and
+    `_apply_sign` (above) widens left to pull in the '-' or '('. This picks
+    up from there, skipping back over the run of spaces before `start` and
+    checking whether a known currency marker ends right there. Only call
+    this when `_apply_sign` actually found a sign or paren immediately
+    before `start` - a bare 'CHF 12.34' already matches the prefix
+    alternative directly and must not come through here.
+
+    Returns the widened start and the marker's canonical currency code, or
+    the original `start` and `None` when no marker is found (or it is
+    glued to a preceding word, e.g. 'XCHF -12.34').
+    """
+    pos = start
+    while pos > 0 and text[pos - 1] in " \t\u00a0":
+        pos -= 1
+    for marker in _CURRENCY_MARKERS_BY_LEN:
+        marker_start = pos - len(marker)
+        if marker_start < 0 or text[marker_start:pos] != marker:
+            continue
+        before = text[marker_start - 1] if marker_start > 0 else ""
+        if before.isalnum():
+            continue
+        return marker_start, _CURRENCY_CANON[marker]
+    return start, None
+
+
 def _match_vat_letter_after(text: str, pos: int) -> tuple[int, int, str, bool] | None:
     """Look for a VAT-rate letter immediately following an amount at `pos`.
 
@@ -289,12 +325,20 @@ def extract_tokens(text: str, locale_hint: str | None = None) -> list[FinToken]:
 
     for m in _AMOUNT_CORE_RE.finditer(text):
         start, end, negative = _apply_sign(text, m.start(), m.end())
+        currency = _match_currency(m.group("pfx") or m.group("sfx"))
+        if negative and currency is None and m.group("pfx") is None:
+            # A sign/paren widened the span above but the prefix alternative never
+            # matched (it requires the currency right next to the digits): pick up a
+            # currency marker further left, e.g. 'CHF -12.34' or 'EUR (12.34)'.
+            widened_start, prefix_currency = _extend_currency_prefix(text, start)
+            if prefix_currency is not None:
+                start = widened_start
+                currency = prefix_currency
         if not claims.claim(start, end):
             continue
         cents = _parse_amount_to_cents(m.group("num"))
         if negative:
             cents = -cents
-        currency = _match_currency(m.group("pfx") or m.group("sfx"))
         found.append((start, FinToken(
             type="amount", raw=text[start:end].strip(), canonical=_canonical_cents(cents),
             cents=cents, currency=currency, vat_letter=None, attached=False, cell_ref=None,
