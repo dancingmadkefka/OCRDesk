@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "case_id": "we_missing_row",
+  "category": "invoice",
+  "category_secondary": null,
+  "locale": "IE",
+  "currency": "EUR",
+  "decimal_sep": ".",
+  "vat_letter_scheme": false,
+  "has_tables": true,
+  "required_sections": ["Coastal Wholesale - Order Summary"],
+  "critical_fields": [
+    {
+      "role": "grand_total",
+      "value": "65.00",
+      "cell_ref": {"table_index": 0, "row": 7, "col": 1},
+      "expected_multiplicity": 1
+    }
+  ],
+  "label_value_pairs": [],
+  "line_item_schema": ["item", "price"],
+  "confirmed": true,
+  "notes": "one line-item row omitted: the total still sits beside its label, so A1 passes under row-label alignment; the omission fires A8 (non-critical) and caps display at 74, and archival_safe stays false because an amount is missing"
+}

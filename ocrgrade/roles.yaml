@@ -1,0 +1,16 @@
+# ocrgrade role map v1 (docs/grader-plan.md section 3).
+# 372 classes occur across the 36 real cases with a median count of 1; most are
+# per-document layout noise. This file covers only classes that recur with
+# consistent meaning; everything else falls through to content heuristics in
+# roles.py (numeric regex, total keywords, <th>/thead header).
+total_value:      [final-val, total-value, total-row, payable-amount, obv-amount, receipt-total, total-due-row]
+numeric_value:    {classes: [num, col-amount, amount-col, amount-value, col-price, price-col, col-total, value-col, value-cell, col-qty, col-unit, col-tax], align_expectation: right}
+section_header:   [grey-bg, section-title, main-title, summary-title, header-bar, company-title, invoice-title, receipt-title, receipt-header, header-title, sub-section-title]
+label:            [label, label-col, label-box, field-title, meta-label, slip-label, total-label, obv-label, amount-label, details-label]
+value:            [value, meta-value, slip-val, val-col]
+handwritten:      [handwritten, handwritten-signature, handwritten-notes, handwritten-v]
+monospace:        [mono, monospace, machine-data, code-style, code, machine-codes, ocr-line]
+header:           [header-cell]
+spacer:           [spacer-row, status-row-spacer]
+# alignment hints only (not a Role): text-right, right, right-align, right-aligned, pull-right,
+# text-center, center-text, center

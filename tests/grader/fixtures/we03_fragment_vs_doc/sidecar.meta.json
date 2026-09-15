@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "case_id": "we03_fragment_vs_doc",
+  "category": "bill",
+  "category_secondary": null,
+  "locale": "IE",
+  "currency": "EUR",
+  "decimal_sep": ".",
+  "vat_letter_scheme": false,
+  "has_tables": true,
+  "required_sections": ["Shannon Insurance - Policy Renewal"],
+  "critical_fields": [
+    {
+      "role": "grand_total",
+      "value": "327.50",
+      "cell_ref": {"table_index": 0, "row": 3, "col": 1},
+      "expected_multiplicity": 1
+    }
+  ],
+  "label_value_pairs": [],
+  "line_item_schema": [],
+  "confirmed": true,
+  "notes": "worked example: same content, different valid CSS, fragment (GT) vs full document (hyp)"
+}

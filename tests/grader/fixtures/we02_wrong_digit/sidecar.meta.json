@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "case_id": "we02_wrong_digit",
+  "category": "invoice",
+  "category_secondary": null,
+  "locale": "IE",
+  "currency": "EUR",
+  "decimal_sep": ".",
+  "vat_letter_scheme": false,
+  "has_tables": true,
+  "required_sections": ["O'Brien & Sons - Invoice"],
+  "critical_fields": [
+    {
+      "role": "grand_total",
+      "value": "45.99",
+      "cell_ref": {"table_index": 0, "row": 3, "col": 1},
+      "expected_multiplicity": 1
+    }
+  ],
+  "label_value_pairs": [],
+  "line_item_schema": [],
+  "confirmed": true,
+  "notes": "worked example: one wrong digit in the total (45.99 -> 48.99)"
+}

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "case_id": "we06_label_swap",
+  "category": "bank-statement",
+  "category_secondary": null,
+  "locale": "IE",
+  "currency": "EUR",
+  "decimal_sep": ".",
+  "vat_letter_scheme": false,
+  "has_tables": true,
+  "required_sections": ["Kilkenny Credit Union - Statement"],
+  "critical_fields": [
+    {
+      "role": "opening_balance",
+      "value": "500.00",
+      "cell_ref": {"table_index": 0, "row": 0, "col": 1},
+      "expected_multiplicity": 1
+    },
+    {
+      "role": "grand_total",
+      "value": "620.00",
+      "cell_ref": {"table_index": 0, "row": 3, "col": 1},
+      "expected_multiplicity": 1
+    }
+  ],
+  "label_value_pairs": [
+    {"label": "Opening Balance", "value": "500.00", "source": "sidecar", "cell_ref": null},
+    {"label": "Closing Balance", "value": "620.00", "source": "sidecar", "cell_ref": null}
+  ],
+  "line_item_schema": [],
+  "confirmed": true,
+  "notes": "worked example: opening/closing balance swapped"
+}

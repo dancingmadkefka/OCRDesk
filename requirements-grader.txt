@@ -1,0 +1,13 @@
+# Extra dependencies for ocrgrade (the deterministic OCR/HTML grader), on top of
+# requirements.txt. Version floors are the versions installed in this repo's
+# .venv at the time ocrgrade was built (read via `pip show`); see
+# docs/grader-plan.md's "Assumptions" section.
+lxml>=6.1.3
+html5lib>=1.1
+beautifulsoup4>=4.15.0
+rapidfuzz>=3.14.6
+table_recognition_metric>=0.0.6
+apted>=1.0.3
+Levenshtein>=0.27.5
+pyyaml>=6.0.3
+pytest>=9.1.1

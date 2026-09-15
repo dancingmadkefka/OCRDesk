@@ -16,3 +16,12 @@ venv/
 coverage/
 htmlcov/
 *.egg-info/
+
+# ocrgrade: private per-case annotations and generated run output never enter
+# the repo (docs/grader.md). The negation keeps the committed synthetic fixture
+# sidecars under tests/grader/fixtures/ tracked.
+*.meta.json
+!tests/grader/fixtures/**/*.meta.json
+annotations_review.csv
+shadow_expected.json
+out/
