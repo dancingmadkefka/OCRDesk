@@ -59,26 +59,25 @@ def _cell_token_f1(gt_text: str, hyp_text: str) -> float:
 
 
 def _cell_content_f1(gt_tables: list[Table], hyp_tables: list[Table]) -> float | None:
-    """Token-F1 per aligned GT cell, mean over GT cells with non-empty text.
+    """Row-aligned cell content F1: for every non-empty GT row, the best token-F1 of its cell
+    text against any hypothesis row (any table). Robust to tables being split or merged; a
+    row whose content moved elsewhere still scores by its own text. None when GT has no rows."""
+    def rows_of(tables: list[Table]) -> list[str]:
+        out: list[str] = []
+        for t in tables:
+            for r in sorted({c.row for c in t.cells}):
+                text = _norm(" ".join(c.text_norm for c in t.cells if c.row == r and c.is_span_origin))
+                if text:
+                    out.append(text)
+        return out
 
-    A GT cell with no corresponding hyp table (index beyond hyp table count)
-    or no cell at the same grid slot scores 0.0 for that cell -- it is a real
-    miss, not an N/A.
-    """
-    n_pairs = min(len(gt_tables), len(hyp_tables))
-    scores: list[float] = []
-    for gt_idx, gt_table in enumerate(gt_tables):
-        hyp_lookup: dict[tuple[int, int], Cell] = {}
-        if gt_idx < n_pairs:
-            hyp_lookup = {(c.row, c.col): c for c in hyp_tables[gt_idx].cells}
-        for cell in gt_table.cells:
-            if not cell.text_norm.strip():
-                continue
-            hyp_cell = hyp_lookup.get((cell.row, cell.col))
-            scores.append(0.0 if hyp_cell is None else _cell_token_f1(cell.text_norm, hyp_cell.text_norm))
-    if not scores:
+    gt_rows = rows_of(gt_tables)
+    if not gt_rows:
         return None
-    return sum(scores) / len(scores)
+    hyp_rows = rows_of(hyp_tables)
+    if not hyp_rows:
+        return 0.0
+    return sum(max(_cell_token_f1(g, h) for h in hyp_rows) for g in gt_rows) / len(gt_rows)
 
 
 def _values_match(a: str, b: str) -> bool:

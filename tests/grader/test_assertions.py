@@ -128,17 +128,34 @@ def test_a1_passes_when_value_at_correct_cell():
 
 
 def test_a1_fails_on_wrong_cell():
-    # we01: correct amount present, but not at the expected coordinates.
-    gt = make_doc(tables=[make_table(0, [make_cell(0, 0, "Label"), make_cell(0, 1, "100.00")])])
-    hyp = make_doc(
-        tables=[make_table(0, [make_cell(0, 0, "100.00"), make_cell(0, 1, "Label")])]  # swapped
-    )
+    # we01: the correct amount is present, but beside a different label (Subtotal instead of Total).
+    gt = make_doc(tables=[make_table(0, [
+        make_cell(0, 0, "Subtotal"), make_cell(0, 1, "90.00"),
+        make_cell(1, 0, "Total"), make_cell(1, 1, "100.00"),
+    ])])
+    hyp = make_doc(tables=[make_table(0, [
+        make_cell(0, 0, "Subtotal"), make_cell(0, 1, "100.00"),
+        make_cell(1, 0, "Total"), make_cell(1, 1, "90.00"),
+    ])])
     sidecar = make_sidecar(
-        critical_fields=[CriticalField(role="grand_total", value="100.00", cell_ref=CellRef(0, 0, 1))]
+        critical_fields=[CriticalField(role="grand_total", value="100.00", cell_ref=CellRef(0, 1, 1))]
     )
     result = get(run_assertions(gt, hyp, sidecar), "A1")
     assert result.passed is False
     assert "100.00" in result.detail
+
+
+def test_a1_accepts_same_row_column_swap_and_split_tables():
+    # Row-label alignment: a value beside its own label passes even when columns are swapped
+    # or the row landed in a different table, because models split and merge tables freely.
+    gt = make_doc(tables=[make_table(0, [make_cell(0, 0, "Label"), make_cell(0, 1, "100.00")])])
+    swapped = make_doc(tables=[make_table(0, [make_cell(0, 0, "100.00"), make_cell(0, 1, "Label")])])
+    split = make_doc(tables=[make_table(0, [make_cell(0, 0, "x")]), make_table(1, [make_cell(0, 0, "Label"), make_cell(0, 1, "100.00")])])
+    sidecar = make_sidecar(
+        critical_fields=[CriticalField(role="grand_total", value="100.00", cell_ref=CellRef(0, 0, 1))]
+    )
+    assert get(run_assertions(gt, swapped, sidecar), "A1").passed
+    assert get(run_assertions(gt, split, sidecar), "A1").passed
 
 
 def test_a1_fails_on_wrong_digit():

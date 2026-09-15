@@ -99,14 +99,17 @@ def test_cell_content_f1_missing_hyp_table_scores_zero_for_those_cells():
     assert m["cell_content_f1"] == pytest.approx(0.0)
 
 
-def test_cell_content_f1_ignores_empty_gt_cells():
+def test_cell_content_f1_is_row_aligned_and_ignores_empty_cells():
     gt_table = make_table(0, [make_cell(0, 0, "Total"), make_cell(0, 1, "")])
-    hyp_table = make_table(0, [make_cell(0, 0, "Total"), make_cell(0, 1, "whatever")])
+    hyp_same = make_table(0, [make_cell(0, 0, "Total"), make_cell(0, 1, "")])
     gt = make_doc(tables=[gt_table])
-    hyp = make_doc(tables=[hyp_table])
-    m = structure_metrics(gt, hyp)
-    # only the non-empty "Total" cell counts -> perfect match -> 1.0
-    assert m["cell_content_f1"] == pytest.approx(1.0)
+    assert structure_metrics(gt, make_doc(tables=[hyp_same]))["cell_content_f1"] == pytest.approx(1.0)
+    # extra hallucinated text in the aligned row lowers precision, so the score drops below 1
+    hyp_extra = make_table(0, [make_cell(0, 0, "Total"), make_cell(0, 1, "whatever")])
+    assert structure_metrics(gt, make_doc(tables=[hyp_extra]))["cell_content_f1"] < 1.0
+    # a row that moved to another table still scores by its own text (split tables are not penalised)
+    hyp_split = [make_table(0, [make_cell(0, 0, "x")]), make_table(1, [make_cell(0, 0, "Total"), make_cell(0, 1, "")])]
+    assert structure_metrics(gt, make_doc(tables=hyp_split))["cell_content_f1"] == pytest.approx(1.0)
 
 
 # --- label_value_f1 -----------------------------------------------------------------------

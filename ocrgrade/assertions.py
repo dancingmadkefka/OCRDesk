@@ -5,10 +5,12 @@ docs/grader-plan.md section 4 for the exact rule text this implements.
 """
 from __future__ import annotations
 
+import difflib
+
 import re
 from collections import Counter
 
-from ocrgrade.ir import AssertionResult, Cell, Document, FinToken, LineItem, Sidecar
+from ocrgrade.ir import AssertionResult, Cell, Document, FinToken, LineItem, Sidecar, Table
 
 # Same regex given verbatim in docs/grader-plan.md section 3 ("total keyword"
 # content heuristic); A2 reuses it directly rather than depending on Scope
@@ -87,7 +89,94 @@ def _value_in_cell(value: str, cell: Cell) -> bool:
     return cents is not None and any(t.type == "amount" and t.cents == cents for t in cell.tokens)
 
 
+def _row_origin_cells(table: Table, row: int) -> list[Cell]:
+    return [c for c in table.cells if c.row == row and c.is_span_origin]
+
+
+def _row_label(table: Table, row: int, exclude_col: int | None) -> str:
+    """Label text of a table row: its non-numeric cells (excluding the value cell). When the row
+    carries no label, walk up to three rows for the nearest labelled row (statement blocks)."""
+    for r in range(row, max(-1, row - 4), -1):
+        parts = [
+            c.text_norm for c in _row_origin_cells(table, r)
+            if c.text_norm.strip() and not c.is_numeric and not (r == row and c.col == exclude_col)
+        ]
+        if parts:
+            return " ".join(parts)
+    return ""
+
+
+def _col_header(table: Table, col: int) -> str:
+    """Text of the header cell above a column when the table's first row is a header row."""
+    first = _row_origin_cells(table, 0) or [c for c in table.cells if c.row == 0]
+    if not first or not all((c.is_header or not c.is_numeric) for c in first if c.text_norm.strip()):
+        return ""
+    for c in table.cells:
+        if c.row == 0 and c.col == col:
+            return c.text_norm
+    return ""
+
+
+_LABEL_TOKEN_RE = re.compile(r"[0-9a-z]+")
+
+
+def _label_tokens(text: str) -> list[str]:
+    return _LABEL_TOKEN_RE.findall(text.casefold())
+
+
+def _label_matches(gt_label: str, hyp_text: str) -> bool:
+    """Every word of the GT label must appear as a whole word in the hypothesis text.
+
+    Word-level on purpose: 'Closing Balance' vs 'Opening Balance' and 'Total' vs 'Subtotal'
+    are different financial meanings that character-level fuzziness would blur. A word of
+    five or more characters tolerates a small OCR slip (ratio >= 0.85, e.g. 'tota1')."""
+    g_toks = _label_tokens(gt_label)
+    if not g_toks:
+        return True
+    h_toks = _label_tokens(hyp_text)
+    if not h_toks:
+        return False
+
+    def word_ok(g: str) -> bool:
+        if g in h_toks:
+            return True
+        if len(g) >= 5:
+            return any(len(h) >= 5 and difflib.SequenceMatcher(None, g, h).ratio() >= 0.85 for h in h_toks)
+        return False
+
+    return all(word_ok(g) for g in g_toks)
+
+
+def _value_in_labelled_row(value: str, gt_label: str, gt_col_header: str, hyp: Document) -> tuple[bool, str]:
+    """Is the value present in some hypothesis row whose label matches the GT row label (and,
+    when both sides have column headers, under a matching header)? Returns (found, note)."""
+    seen_labels: list[str] = []
+    for table in hyp.tables:
+        rows = sorted({c.row for c in table.cells})
+        for r in rows:
+            cells = _row_origin_cells(table, r)
+            hits = [c for c in cells if _value_in_cell(value, c)]
+            if not hits:
+                continue
+            row_label = " ".join(c.text_norm for c in cells if c.text_norm.strip() and not c.is_numeric)
+            if not _label_matches(gt_label, row_label):
+                # a value cell may carry its own label text ("Total 66.71"); check the cell text too
+                if not any(_label_matches(gt_label, c.text_norm) for c in hits):
+                    seen_labels.append(row_label or "(no label)")
+                    continue
+            if gt_col_header:
+                headers = [_col_header(table, c.col) for c in hits]
+                if any(headers) and not any(_label_matches(gt_col_header, h) for h in headers if h):
+                    seen_labels.append(f"column {headers}")
+                    continue
+            return True, ""
+    return False, f"value present only in rows labelled {seen_labels[:3]}" if seen_labels else "value not found in any hyp table row"
+
+
 def _check_a1(gt: Document, hyp: Document, sidecar: Sidecar) -> AssertionResult:
+    """Critical values must sit in a hypothesis row whose label matches the GT row (and under a
+    matching column header when both tables have one). Exact grid coordinates are accepted as a
+    fast path; they are not required, because models split and merge tables freely."""
     fields_with_ref = [cf for cf in sidecar.critical_fields if cf.cell_ref is not None]
     if not fields_with_ref:
         return AssertionResult("A1", True, True, "no critical fields with cell_ref to check")
@@ -99,11 +188,17 @@ def _check_a1(gt: Document, hyp: Document, sidecar: Sidecar) -> AssertionResult:
         assert ref is not None
         key = (ref.table_index, ref.row, ref.col)
         hyp_cell = lookup.get(key)
-        if hyp_cell is None:
-            failures.append(f"critical field {cf.role}={cf.value!r}: no hyp cell at {key}")
-        elif not _value_in_cell(cf.value, hyp_cell):
+        if hyp_cell is not None and _value_in_cell(cf.value, hyp_cell):
+            continue
+        gt_label, gt_header = "", ""
+        if ref.table_index < len(gt.tables):
+            gt_table = gt.tables[ref.table_index]
+            gt_label = _row_label(gt_table, ref.row, ref.col)
+            gt_header = _col_header(gt_table, ref.col)
+        found, note = _value_in_labelled_row(cf.value, gt_label, gt_header, hyp)
+        if not found:
             failures.append(
-                f"critical field {cf.role}={cf.value!r}: hyp cell at {key} has {hyp_cell.text_norm!r}"
+                f"critical field {cf.role}={cf.value!r} (GT row label {gt_label!r}): {note}"
             )
     passed = not failures
     detail = "all critical fields aligned" if passed else "; ".join(failures)
