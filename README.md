@@ -84,6 +84,22 @@ The app stores OCR output as HTML because document structure matters. Tables, co
 
 Design reasoning and implementation notes live in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## Grader
+
+`ocrgrade` is a deterministic, structure-aware grader for image-to-HTML OCR/VLM
+output: table structure, financial-token exact match, and critical-field
+correctness assertions, not a text diff. It scores OCRDesk's own output, AI
+Financial Advisor's `html_vlm_*.json` benchmark results, or a plain directory
+of hypothesis files.
+
+```powershell
+.\.venv\Scripts\python.exe -m ocrgrade score --ocrdesk-images-dir images --model my-model --out-dir out
+```
+
+See [docs/grader.md](docs/grader.md) for the full workflow (annotation,
+sidecars, output files) and [docs/grader-plan.md](docs/grader-plan.md) for the
+scoring design while it is under active implementation.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

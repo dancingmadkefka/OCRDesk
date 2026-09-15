@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "case_id": "we01_wrong_cell",
+  "category": "receipt",
+  "category_secondary": null,
+  "locale": "IE",
+  "currency": "EUR",
+  "decimal_sep": ".",
+  "vat_letter_scheme": false,
+  "has_tables": true,
+  "required_sections": ["Kelly's SuperValu - Receipt"],
+  "critical_fields": [
+    {
+      "role": "grand_total",
+      "value": "5.50",
+      "cell_ref": {"table_index": 0, "row": 5, "col": 2},
+      "expected_multiplicity": 1
+    }
+  ],
+  "label_value_pairs": [],
+  "line_item_schema": [],
+  "confirmed": true,
+  "notes": "worked example: correct amount, wrong cell (total/VAT swapped)"
+}

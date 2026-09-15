@@ -210,6 +210,42 @@ No automated grader ships yet (`normalizeForCompare` only strips fences and norm
 
 ---
 
+## Grader decisions (2026-09-15)
+
+`ocrgrade/` adds a deterministic grader for OCRDesk/AI Financial Advisor HTML
+output alongside the app, documented fully in `docs/grader.md` and
+`docs/grader-plan.md`. The decisions below are the ones worth remembering
+outside those docs, because they trade away something a more thorough design
+would have kept:
+
+- **Grid-position alignment, not tree alignment.** `table_recognition_metric`'s
+  `TEDS` returns a bare score with no node mapping, so ocrgrade pairs GT and
+  hypothesis tables by document order and compares cells at identical
+  `(table, row, col)` coordinates after rowspan/colspan expansion. This is
+  cheap and deterministic, but a single omitted row shifts every later row's
+  coordinates, so one real omission can present as a cascade of aligned-cell
+  failures rather than one. Accepted for the MVP; `tests/grader/fixtures/we_missing_row`
+  documents the failure mode on purpose rather than hiding it.
+- **Tiers and score ceilings are a deliberate, coarse gate.** `CATASTROPHIC` /
+  `REJECT` / `PASS` plus a `DisplayScore` ceiling (59 when any critical
+  assertion fails, 74 when critical assertions pass but label/value or
+  line-item grouping is imperfect) exist so one wrong total cannot be
+  outscored by fluent prose elsewhere in the document. The exact ceilings and
+  the `Content` sub-weights are first-pass numbers, expected to move after
+  running `shadow` against the real corpus - they are not load-bearing for
+  anything outside this repo yet.
+- **No presentation scoring in this MVP.** Matching OCRDesk's own principle
+  (see "Core principle: separate document content from app chrome" above),
+  `ocrgrade` grades document content only. A presentation tie-breaker is
+  named in the design as a future no-op hook; it does nothing here.
+- **Fixtures are synthetic, not excerpts of the real corpus.** The 36-case
+  ground-truth corpus this grader is built against never enters this public
+  repo. Every fixture under `tests/grader/fixtures/` is hand-authored,
+  invented merchants and numbers, chosen to exercise one worked-example
+  failure mode each (wrong cell, duplicated total, detached VAT letter, ...).
+  `fixtures-check` is the CI gate; `shadow` against the real corpus is manual,
+  local, and never runs in CI.
+
 ## Open questions (not settled)
 
 - **Default right pane when GT exists:** Currently resets to Original image on navigation; user may want GT on the right by default for review.

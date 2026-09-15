@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "case_id": "we04_omission",
+  "category": "bill",
+  "category_secondary": null,
+  "locale": "IE",
+  "currency": "EUR",
+  "decimal_sep": ".",
+  "vat_letter_scheme": false,
+  "has_tables": true,
+  "required_sections": ["Emerald Telecom - Monthly Invoice", "Payment Details"],
+  "critical_fields": [
+    {
+      "role": "grand_total",
+      "value": "73.00",
+      "cell_ref": {"table_index": 0, "row": 4, "col": 1},
+      "expected_multiplicity": 1
+    }
+  ],
+  "label_value_pairs": [],
+  "line_item_schema": ["service", "amount"],
+  "confirmed": true,
+  "notes": "worked example: beautiful output, omitted line item and the Payment Details section"
+}
