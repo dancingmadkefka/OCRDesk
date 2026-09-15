@@ -103,7 +103,13 @@ def _find_gt_for_case(case_dir: Path, image_path: Path | None) -> Path | None:
 
 
 def _sidecar_path_for(gt_path: Path) -> Path:
-    return gt_path.with_name(f"{gt_path.stem}.meta.json")
+    """<stem>.meta.json next to the GT (what `annotate` writes); when that file does not exist
+    and the folder holds exactly one *.meta.json (fixture corpora use sidecar.meta.json), use it."""
+    preferred = gt_path.with_name(f"{gt_path.stem}.meta.json")
+    if preferred.is_file():
+        return preferred
+    candidates = sorted(p for p in gt_path.parent.glob("*.meta.json") if p.is_file())
+    return candidates[0] if len(candidates) == 1 else preferred
 
 
 # --- OCRDesk corpus discovery ------------------------------------------------

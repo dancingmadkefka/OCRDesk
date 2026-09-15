@@ -127,14 +127,14 @@ def test_derive_category_from_gt_text_keyword(ir_factory):
     assert sc.confirmed is False
 
 
-def test_derive_category_prefers_gt_keyword_over_manifest_prior(ir_factory):
+def test_derive_category_prefers_manifest_prior_over_gt_keyword(ir_factory):
     doc = ir_factory.document(body_text_norm="Please find your payslip enclosed, net pay below.")
 
     sc = sidecar.derive(
         "c", "", {"document_type": "invoice"}, build_document=lambda h, r, s: doc, role_map=None
     )
 
-    assert sc.category == "payslip"
+    assert sc.category == "invoice"  # the curated manifest is the prior; keywords only fill gaps
 
 
 def test_derive_category_falls_back_to_manifest_prior_when_no_keyword_fires(ir_factory):
@@ -310,15 +310,13 @@ def test_derive_critical_fields_skips_non_span_origin_cells(ir_factory):
     assert sc.critical_fields == []
 
 
-def test_derive_critical_fields_value_falls_back_to_text_norm_without_tokens(ir_factory):
+def test_derive_critical_fields_skips_total_cells_without_amount_tokens(ir_factory):
     cell = ir_factory.cell(0, 0, 0, role="total_value", text_raw="Total", text_norm="total due", tokens=[])
     doc = ir_factory.document(tables=[ir_factory.table(cells=[cell])], fin_tokens=[])
 
     sc = sidecar.derive("c", "", {}, build_document=lambda h, r, s: doc, role_map=None)
 
-    assert len(sc.critical_fields) == 1
-    assert sc.critical_fields[0].value == "total due"
-    assert sc.critical_fields[0].expected_multiplicity == 1
+    assert sc.critical_fields == []  # a total cell with no amount token is not a critical field
 
 
 def test_derive_critical_fields_ignores_non_total_roles(ir_factory):

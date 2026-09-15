@@ -102,8 +102,9 @@ def test_plain_decimal_no_grouping():
     assert _amounts("2.00")[0].cents == 200
 
 
-def test_grouped_thousands_without_fraction():
-    amount = _amounts("1,234")[0]
+def test_grouped_thousands_without_fraction_needs_a_currency_marker():
+    assert _amounts("1,234") == []  # bare grouped integers are identifiers, not money
+    amount = _amounts("EUR 1,234")[0]
     assert amount.cents == 123400
 
 

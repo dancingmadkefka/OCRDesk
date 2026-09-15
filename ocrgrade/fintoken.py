@@ -33,11 +33,15 @@ def _match_currency(raw: str | None) -> str | None:
 # currency prefix or suffix (glued or spaced).
 # ---------------------------------------------------------------------------
 
+# Grouped-thousands forms need a decimal part unless a currency marker anchors them
+# (see _AMOUNT_CUR_INT_RE): a bare '116.303.292' is an identifier, not 116 million.
+# The plain-decimal form must not clip a longer separated run ('116.30' inside
+# '116.303.292', '6.6' inside the date '6.6.25').
 _NUM_CORE = r"""
-    \d{1,3}(?:,\d{3})+(?:\.\d{1,2})?     # 1,234.56 or 1,234
-  | \d{1,3}(?:\.\d{3})+(?:,\d{1,2})?     # 1.234,56 or 1.234
-  | \d{1,3}(?:'\d{3})+(?:\.\d{1,2})?     # 1'234.56 or 1'234  (Swiss)
-  | \d+[.,]\d{1,2}                       # 59.99 / 59,99
+    (?<![\d.,'])\d{1,3}(?:,\d{3})+\.\d{2}(?![\d.,'])    # 1,234.56
+  | (?<![\d.,'])\d{1,3}(?:\.\d{3})+,\d{2}(?![\d.,'])    # 1.234,56
+  | (?<![\d.,'])\d{1,3}(?:'\d{3})+\.\d{2}(?![\d.,'])    # 1'234.56  (Swiss)
+  | (?<![\d.,'])\d+[.,]\d{1,2}(?![\d.,'])                # 59.99 / 59,99 / 59.9
 """
 
 #: The prefix/suffix whitespace is grouped *with* its currency alternative so
@@ -54,8 +58,8 @@ _AMOUNT_CORE_RE = re.compile(
 # (otherwise "6" in "6 Items" or a product code would misfire).
 _AMOUNT_CUR_INT_RE = re.compile(
     rf"""
-    (?:(?P<pfx2>{_CURRENCY_ALT})\s*(?P<num2>\d+)(?!\d))
-  | (?:(?P<num3>\d+)(?!\d)\s*(?P<sfx2>{_CURRENCY_ALT}))
+    (?:(?P<pfx2>{_CURRENCY_ALT})\s*(?P<num2>\d{{1,3}}(?:[,.']\d{{3}})*|\d+)(?![\d.,']))
+  | (?:(?P<num3>\d{{1,3}}(?:[,.']\d{{3}})*|\d+)(?![\d.,'])\s*(?P<sfx2>{_CURRENCY_ALT}))
     """,
     re.VERBOSE,
 )
@@ -109,6 +113,8 @@ def _match_vat_letter_after(text: str, pos: int) -> tuple[int, int, str, bool] |
 # ---------------------------------------------------------------------------
 
 _DATE_SEP_RE = re.compile(r"\b(\d{1,2})([./])(\d{1,2})\2(\d{4})\b")
+# Two-digit years ('6.6.25', '07/06/18') are dates too; day/month ranges are checked in code.
+_DATE_SEP2_RE = re.compile(r"(?<![\d.,'/])(\d{1,2})([./])(\d{1,2})\2(\d{2})(?![\d.,'/])")
 _DATE_ISO_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 
 # ---------------------------------------------------------------------------
@@ -142,7 +148,10 @@ _IBAN_CANDIDATE_RE = re.compile(
 # "Authorisation Code: 222483"), and bare long digit runs as a backstop.
 # ---------------------------------------------------------------------------
 
-_REF_ID_EXPLICIT_RE = re.compile(r"\b[A-Z]{2,6}-\d{4}-\d{2,8}\b")
+_REF_ID_EXPLICIT_RE = re.compile(
+    r"\b[A-Z]{2,6}-\d{4}-\d{2,8}\b"          # INV-2024-0098
+    r"|\b[A-Z]{2,6}-\d{2,3}(?:\.\d{3}){2,}\b"   # CHE-116.303.292 (Swiss UID)
+)
 _REF_ID_LABELED_RE = re.compile(
     r"\b(?:EFT\s*No\.?|Ref(?:erence)?\s*No\.?|Auth(?:orisation)?\s*Code)\s*:?\s*(\d{5,})\b",
     re.I,
@@ -215,6 +224,18 @@ def extract_tokens(text: str, locale_hint: str | None = None) -> list[FinToken]:
             currency=None, vat_letter=None, attached=False, cell_ref=None,
         )))
 
+    for m in _DATE_SEP2_RE.finditer(text):
+        dd, mm, yy = int(m.group(1)), int(m.group(3)), int(m.group(4))
+        if not (1 <= dd <= 31 and 1 <= mm <= 12):
+            continue
+        if not claims.claim(*m.span()):
+            continue
+        yyyy = 2000 + yy if yy < 70 else 1900 + yy
+        found.append((m.start(), FinToken(
+            type="date", raw=m.group(0), canonical=f"{yyyy}-{mm:02d}-{dd:02d}", cents=None,
+            currency=None, vat_letter=None, attached=False, cell_ref=None,
+        )))
+
     for m in _DATE_ISO_RE.finditer(text):
         if not claims.claim(*m.span()):
             continue
@@ -231,6 +252,15 @@ def extract_tokens(text: str, locale_hint: str | None = None) -> list[FinToken]:
         num = m.group("num").replace(",", ".")
         found.append((m.start(), FinToken(
             type="percent", raw=m.group(0), canonical=num, cents=None,
+            currency=None, vat_letter=None, attached=False, cell_ref=None,
+        )))
+
+    # Explicit alphanumeric ids run before amounts so 'CHE-116.303.292' is never an amount.
+    for m in _REF_ID_EXPLICIT_RE.finditer(text):
+        if not claims.claim(*m.span()):
+            continue
+        found.append((m.start(), FinToken(
+            type="reference_id", raw=m.group(0), canonical=m.group(0), cents=None,
             currency=None, vat_letter=None, attached=False, cell_ref=None,
         )))
 
@@ -262,14 +292,6 @@ def extract_tokens(text: str, locale_hint: str | None = None) -> list[FinToken]:
         found.append((m.start(), FinToken(
             type="amount", raw=m.group(0).strip(), canonical=f"{cents / 100:.2f}",
             cents=cents, currency=currency, vat_letter=None, attached=False, cell_ref=None,
-        )))
-
-    for m in _REF_ID_EXPLICIT_RE.finditer(text):
-        if not claims.claim(*m.span()):
-            continue
-        found.append((m.start(), FinToken(
-            type="reference_id", raw=m.group(0), canonical=m.group(0), cents=None,
-            currency=None, vat_letter=None, attached=False, cell_ref=None,
         )))
 
     for m in _REF_ID_LABELED_RE.finditer(text):

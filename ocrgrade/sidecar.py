@@ -40,6 +40,9 @@ CATEGORY_ENUM = (
 
 # Manifest `document_type` values (or close synonyms) that map directly onto the enum.
 _MANIFEST_ALIASES = {
+    "statement": "bank-statement",  # AIFA manifest uses 'statement' for bank/card/balancing statements
+    "payslip": "payslip",
+    "contract": "other",
     "receipt": "receipt",
     "invoice": "invoice",
     "bank_statement": "bank-statement",
@@ -288,18 +291,18 @@ def _normalize_manifest_category(manifest_entry: dict[str, Any]) -> str | None:
 
 
 def _infer_category(document: "Document", manifest_entry: dict[str, Any]) -> tuple[str, str | None]:
-    """Keyword regex over GT text, with the manifest `document_type` as a prior.
-
-    Regex evidence pulled straight from the GT text wins when it fires; the
-    manifest prior is the fallback when no keyword matches. Both are heuristics
-    -- `annotate` always writes `confirmed: false` and expects human review.
+    """The manifest `document_type` (curated per case) is the prior and wins when present;
+    the keyword regex over the GT text only fills in when the manifest says nothing.
+    Both are heuristics -- `annotate` always writes `confirmed: false` and expects human review.
     """
     prior = _normalize_manifest_category(manifest_entry)
+    if prior:
+        return prior, None
     text = document.body_text_norm or ""
     for category, pattern in _CATEGORY_KEYWORDS:
         if re.search(pattern, text, re.I):
             return category, None
-    return prior or "other", None
+    return "other", None
 
 
 def _build_critical_fields(document: "Document") -> list[CriticalField]:
@@ -314,6 +317,8 @@ def _build_critical_fields(document: "Document") -> list[CriticalField]:
             if cell.role != "total_value" or not cell.is_span_origin:
                 continue
             value = _amount_value_for_cell(cell)
+            if not value:
+                continue  # a total cell with no amount (empty or label-only) is not a critical field
             role = "subtotal" if _SUBTOTAL_RE.search(cell.text_norm) else "grand_total"
             multiplicity = amount_counts.get(value, 1) if value else 1
             fields.append(
@@ -328,10 +333,11 @@ def _build_critical_fields(document: "Document") -> list[CriticalField]:
 
 
 def _amount_value_for_cell(cell) -> str:
+    """Canonical amount of a total cell, or '' when the cell holds no amount token."""
     for token in cell.tokens:
         if token.type == "amount" and token.canonical:
             return token.canonical
-    return cell.text_norm
+    return ""
 
 
 def _lvp_to_dict(pair) -> dict[str, Any]:

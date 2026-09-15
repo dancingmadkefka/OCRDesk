@@ -183,22 +183,26 @@ def main(
 
 
 def _load_manifest(path: Path | None) -> dict[str, dict]:
-    """`ocr_manifest.json`: either `{case_id: {...}}` or `[{"case_id": ..., ...}]`."""
+    """`ocr_manifest.json` in any of three shapes: `{case_id: {...}}`, `[{"case_id"|"id": ...}]`,
+    or AIFA's `{"cases": [{"id": ..., "document_type": ...}]}`. Returns {case_id: entry}."""
     if path is None:
         return {}
     if not path.is_file():
         print(f"warning: manifest file not found, continuing without it: {path}", file=sys.stderr)
         return {}
     data = json.loads(path.read_text(encoding="utf-8"))
-    if isinstance(data, dict):
-        return data
+    if isinstance(data, dict) and isinstance(data.get("cases"), list):
+        data = data["cases"]
     if isinstance(data, list):
         out: dict[str, dict] = {}
         for entry in data:
-            case_id = entry.get("case_id") if isinstance(entry, dict) else None
-            if case_id:
-                out[case_id] = entry
+            if isinstance(entry, dict):
+                key = entry.get("case_id") or entry.get("id")
+                if key:
+                    out[str(key)] = entry
         return out
+    if isinstance(data, dict):
+        return {str(k): v for k, v in data.items() if isinstance(v, dict)}
     return {}
 
 

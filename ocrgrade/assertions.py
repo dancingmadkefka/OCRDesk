@@ -64,6 +64,29 @@ def _hyp_cell_lookup(hyp: Document) -> dict[tuple[int, int, int], Cell]:
     return lookup
 
 
+def _cents_of(value: str) -> int | None:
+    """Cents of a critical-field value when it is a single amount, else None."""
+    from ocrgrade.fintoken import extract_tokens
+
+    amounts = [t for t in extract_tokens(value) if t.type == "amount" and t.cents is not None]
+    return amounts[0].cents if len(amounts) == 1 else None
+
+
+def _value_in_cell(value: str, cell: Cell) -> bool:
+    """True when the critical value is present in the cell: as whitespace-insensitive text,
+    as a token canonical, or as the same amount in cents (so '3637.00' matches '3,637.00',
+    "1'932.24" and '3637,00' alike). Locale formatting is never a placement error."""
+    v = _squash(value)
+    if not v:
+        return False
+    if v in _squash(cell.text_norm):
+        return True
+    if any(_squash(t.canonical) == v for t in cell.tokens if t.canonical):
+        return True
+    cents = _cents_of(value)
+    return cents is not None and any(t.type == "amount" and t.cents == cents for t in cell.tokens)
+
+
 def _check_a1(gt: Document, hyp: Document, sidecar: Sidecar) -> AssertionResult:
     fields_with_ref = [cf for cf in sidecar.critical_fields if cf.cell_ref is not None]
     if not fields_with_ref:
@@ -78,7 +101,7 @@ def _check_a1(gt: Document, hyp: Document, sidecar: Sidecar) -> AssertionResult:
         hyp_cell = lookup.get(key)
         if hyp_cell is None:
             failures.append(f"critical field {cf.role}={cf.value!r}: no hyp cell at {key}")
-        elif _norm(cf.value) not in _norm(hyp_cell.text_norm):
+        elif not _value_in_cell(cf.value, hyp_cell):
             failures.append(
                 f"critical field {cf.role}={cf.value!r}: hyp cell at {key} has {hyp_cell.text_norm!r}"
             )
@@ -108,7 +131,10 @@ def _cell_match_values(cell: Cell) -> list[str]:
 
 
 def _check_a2(gt: Document, hyp: Document) -> AssertionResult:
-    total_cells = [c for t in gt.tables for c in t.cells if c.role == "total_value"]
+    total_cells = [
+        c for t in gt.tables for c in t.cells
+        if c.role == "total_value" and c.is_span_origin and c.text_norm.strip()
+    ]
     if not total_cells:
         return AssertionResult("A2", True, True, "no GT total_value cells to check")
 
