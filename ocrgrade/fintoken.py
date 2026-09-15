@@ -29,7 +29,7 @@ def _match_currency(raw: str | None) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Amounts: 1,234.56 / 1.234,56 / 1'234.56 / plain 59.99, with optional
+# Amounts: 1,234.56 / 1.234,56 / 1'234.56 / plain 64.95, with optional
 # currency prefix or suffix (glued or spaced).
 # ---------------------------------------------------------------------------
 
@@ -41,7 +41,7 @@ _NUM_CORE = r"""
     (?<![\d.,'])\d{1,3}(?:,\d{3})+\.\d{2}(?![\d.,'])    # 1,234.56
   | (?<![\d.,'])\d{1,3}(?:\.\d{3})+,\d{2}(?![\d.,'])    # 1.234,56
   | (?<![\d.,'])\d{1,3}(?:'\d{3})+\.\d{2}(?![\d.,'])    # 1'234.56  (Swiss)
-  | (?<![\d.,'])\d+[.,]\d{1,2}(?![\d.,'])                # 59.99 / 59,99 / 59.9
+  | (?<![\d.,'])\d+[.,]\d{1,2}(?![\d.,'])                # 64.95 / 59,99 / 59.9
 """
 
 #: The prefix/suffix whitespace is grouped *with* its currency alternative so
@@ -66,7 +66,7 @@ _AMOUNT_CUR_INT_RE = re.compile(
 
 # Irish till-receipt VAT rate letters. Deliberately a fixed allowlist, not
 # `[A-Z]`: "O" (visually a zero) and any other letter must never attach, per
-# the "59.99 O" negative case in tests/grader/test_fintoken.py.
+# the "64.95 O" negative case in tests/grader/test_fintoken.py.
 _VAT_LETTERS = "ABCDEFGH"
 
 
@@ -152,9 +152,9 @@ def _match_vat_letter_after(text: str, pos: int) -> tuple[int, int, str, bool] |
     """Look for a VAT-rate letter immediately following an amount at `pos`.
 
     Returns (start, end, letter, attached) or None. `attached` is True for
-    both glued ("59.99D") and same-line-spaced ("59.99 D") adjacency, and
+    both glued ("64.95D") and same-line-spaced ("64.95 D") adjacency, and
     False only when the letter sits across a block/newline boundary
-    ("59.99\\nD") — matching the three-way triad in the plan exactly.
+    ("64.95\\nD") — matching the three-way triad in the plan exactly.
     """
     window = text[pos : pos + 24]
     # Non-breaking spaces (models emit `&nbsp;` between amount and letter) are still the same line.
@@ -203,13 +203,13 @@ _IBAN_CANDIDATE_RE = re.compile(
 )
 
 # ---------------------------------------------------------------------------
-# Reference ids: "INV-2024-0098" style, labeled runs ("EFT No.: 20111669548",
-# "Authorisation Code: 222483"), and bare long digit runs as a backstop.
+# Reference ids: "INV-2024-0098" style, labeled runs ("EFT No.: 30458812736",
+# "Authorisation Code: 418265"), and bare long digit runs as a backstop.
 # ---------------------------------------------------------------------------
 
 _REF_ID_EXPLICIT_RE = re.compile(
     r"\b[A-Z]{2,6}-\d{4}-\d{2,8}\b"          # INV-2024-0098
-    r"|\b[A-Z]{2,6}-\d{2,3}(?:\.\d{3}){2,}\b"   # CHE-116.303.292 (Swiss UID)
+    r"|\b[A-Z]{2,6}-\d{2,3}(?:\.\d{3}){2,}\b"   # CHE-482.915.736 (Swiss UID)
 )
 _REF_ID_LABELED_RE = re.compile(
     r"\b(?:EFT\s*No\.?|Ref(?:erence)?\s*No\.?|Auth(?:orisation)?\s*Code)\s*:?\s*(\d{5,})\b",
@@ -314,7 +314,7 @@ def extract_tokens(text: str, locale_hint: str | None = None) -> list[FinToken]:
             currency=None, vat_letter=None, attached=False, cell_ref=None,
         )))
 
-    # Explicit alphanumeric ids run before amounts so 'CHE-116.303.292' is never an amount.
+    # Explicit alphanumeric ids run before amounts so 'CHE-482.915.736' is never an amount.
     for m in _REF_ID_EXPLICIT_RE.finditer(text):
         if not claims.claim(*m.span()):
             continue

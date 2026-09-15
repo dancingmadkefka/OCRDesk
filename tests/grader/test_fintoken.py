@@ -17,32 +17,32 @@ def _vat_letters(text: str) -> list:
 
 
 def test_vat_letter_glued_is_attached():
-    tokens = extract_tokens("59.99D")
-    amount = _amounts("59.99D")[0]
-    assert amount.cents == 5999
+    tokens = extract_tokens("64.95D")
+    amount = _amounts("64.95D")[0]
+    assert amount.cents == 6495
     assert amount.vat_letter == "D"
     assert amount.attached is True
-    letters = _vat_letters("59.99D")
+    letters = _vat_letters("64.95D")
     assert len(letters) == 1
     assert letters[0].vat_letter == "D"
     assert letters[0].attached is True
-    assert letters[0].cents == 5999
+    assert letters[0].cents == 6495
     assert len(tokens) == 2  # amount + vat_letter, nothing else
 
 
 def test_vat_letter_space_separated_is_attached():
-    amount = _amounts("59.99 D")[0]
-    assert amount.cents == 5999
+    amount = _amounts("64.95 D")[0]
+    assert amount.cents == 6495
     assert amount.vat_letter == "D"
     assert amount.attached is True
 
 
 def test_vat_letter_block_separated_is_not_attached():
-    amount = _amounts("59.99\nD")[0]
-    assert amount.cents == 5999
+    amount = _amounts("64.95\nD")[0]
+    assert amount.cents == 6495
     assert amount.vat_letter == "D"
     assert amount.attached is False
-    letters = _vat_letters("59.99\nD")
+    letters = _vat_letters("64.95\nD")
     assert letters[0].attached is False
 
 
@@ -54,13 +54,13 @@ def test_ocr_glyph_confusion_letter_not_treated_as_valid_vat_letter():
     `[A-Z]` wildcard implementation would wrongly attach it; the allowlist
     must reject it while still correctly parsing the amount itself.
     """
-    amounts = _amounts("59.99 O")
+    amounts = _amounts("64.95 O")
     assert len(amounts) == 1
     amount = amounts[0]
-    assert amount.cents == 5999  # "59.99" alone is an unambiguous, correct amount
+    assert amount.cents == 6495  # "64.95" alone is an unambiguous, correct amount
     assert amount.vat_letter is None
     assert amount.attached is False
-    assert _vat_letters("59.99 O") == []
+    assert _vat_letters("64.95 O") == []
 
 
 def test_ocr_glyph_confusions_are_not_normalized():
@@ -97,7 +97,7 @@ def test_swiss_apostrophe_thousands():
 
 
 def test_plain_decimal_no_grouping():
-    assert _amounts("59.99")[0].cents == 5999
+    assert _amounts("64.95")[0].cents == 6495
     assert _amounts("0.75")[0].cents == 75
     assert _amounts("2.00")[0].cents == 200
 
@@ -112,8 +112,8 @@ def test_grouped_thousands_without_fraction_needs_a_currency_marker():
 
 
 def test_currency_prefix_glued():
-    amount = _amounts("EUR66.71")[0]
-    assert amount.cents == 6671
+    amount = _amounts("EUR57.43")[0]
+    assert amount.cents == 5743
     assert amount.currency == "EUR"
 
 
@@ -128,17 +128,17 @@ def test_currency_symbol_suffix_gbp():
 
 
 def test_bare_integer_requires_currency_marker():
-    assert _amounts("84693") == []  # a product code, not an amount
+    assert _amounts("62417") == []  # a product code, not an amount
     assert _amounts("6 Items") == []
     assert _amounts("EUR 100")[0].cents == 10000
 
 
 def test_word_after_amount_is_not_a_vat_letter():
     """'Vat' is three letters, not a lone allowlisted letter — must not
-    misfire the way "48.77 Vat" (a real GT cell) could with a careless
+    misfire the way "41.26 Vat" (a real GT cell) could with a careless
     single-character lookahead.
     """
-    amount = _amounts("48.77 Vat")[0]
+    amount = _amounts("41.26 Vat")[0]
     assert amount.vat_letter is None
     assert amount.attached is False
 
@@ -180,8 +180,8 @@ def test_percent_extraction():
 
 
 def test_masked_card_normalizes_star_run():
-    tokens = [t for t in extract_tokens("************2840") if t.type == "masked_card"]
-    assert tokens[0].canonical == "****2840"
+    tokens = [t for t in extract_tokens("************5173") if t.type == "masked_card"]
+    assert tokens[0].canonical == "****5173"
 
 
 # --- IBAN ----------------------------------------------------------------
@@ -207,18 +207,18 @@ def test_reference_id_explicit_pattern():
 
 
 def test_reference_id_labeled_eft_no():
-    tokens = [t for t in extract_tokens("EFT No.: 20111669548") if t.type == "reference_id"]
-    assert tokens[0].canonical == "20111669548"
+    tokens = [t for t in extract_tokens("EFT No.: 30458812736") if t.type == "reference_id"]
+    assert tokens[0].canonical == "30458812736"
 
 
 def test_reference_id_bare_long_digit_run():
-    tokens = [t for t in extract_tokens("Authorisation Code: 222483") if t.type == "reference_id"]
-    assert tokens[0].canonical == "222483"
+    tokens = [t for t in extract_tokens("Authorisation Code: 418265") if t.type == "reference_id"]
+    assert tokens[0].canonical == "418265"
 
 
 def test_short_digit_run_is_not_a_reference_id():
-    assert extract_tokens("Merchant ID: **26020") == [] or all(
-        t.type != "reference_id" for t in extract_tokens("Merchant ID: **26020")
+    assert extract_tokens("Merchant ID: **73915") == [] or all(
+        t.type != "reference_id" for t in extract_tokens("Merchant ID: **73915")
     )
 
 
@@ -227,11 +227,11 @@ def test_short_digit_run_is_not_a_reference_id():
 
 def test_attach_vat_letters_merges_adjacent_pair():
     amount = FinToken(
-        type="amount", raw="59.99", canonical="59.99", cents=5999, currency=None,
+        type="amount", raw="64.95", canonical="64.95", cents=6495, currency=None,
         vat_letter=None, attached=False, cell_ref=None,
     )
     letter = FinToken(
-        type="vat_letter", raw="D", canonical="D", cents=5999, currency=None,
+        type="vat_letter", raw="D", canonical="D", cents=6495, currency=None,
         vat_letter="D", attached=True, cell_ref=None,
     )
     merged = attach_vat_letters([amount, letter])
@@ -258,6 +258,6 @@ def test_attach_vat_letters_leaves_non_adjacent_amount_alone():
 
 
 def test_tokens_are_returned_in_document_order():
-    tokens = extract_tokens("Total: 59.99 D, ref INV-2024-0098, date 28/02/2021")
+    tokens = extract_tokens("Total: 64.95 D, ref INV-2024-0098, date 28/02/2021")
     kinds = [t.type for t in tokens]
     assert kinds == ["amount", "vat_letter", "reference_id", "date"]

@@ -12,7 +12,7 @@ def _ctx(role_map=None, **kw):
 
 def test_class_map_total_value():
     ctx = _ctx()
-    assert resolve_role("td", ["total-value"], "66.71", ctx) == "total_value"
+    assert resolve_role("td", ["total-value"], "57.43", ctx) == "total_value"
 
 
 def test_class_map_numeric_value_dict_shape():
@@ -45,7 +45,7 @@ def test_thead_first_row_context_is_header():
 
 def test_total_keyword_with_numeric_text_is_total_value():
     ctx = _ctx()
-    assert resolve_role("p", [], "Total: EUR66.71", ctx) == "total_value"
+    assert resolve_role("p", [], "Total: EUR57.43", ctx) == "total_value"
 
 
 def test_total_keyword_alone_is_label():
@@ -62,12 +62,12 @@ def test_betrag_keyword_recognized():
 
 def test_numeric_text_without_keyword_is_numeric_value():
     ctx = _ctx()
-    assert resolve_role("td", [], "59.99", ctx) == "numeric_value"
+    assert resolve_role("td", [], "64.95", ctx) == "numeric_value"
 
 
 def test_plain_text_is_other():
     ctx = _ctx()
-    assert resolve_role("td", [], "PLUM TOMATOES", ctx) == "other"
+    assert resolve_role("td", [], "CHERRY PEPPERS", ctx) == "other"
 
 
 def test_no_classes_argument_does_not_crash():
@@ -79,7 +79,7 @@ def test_no_classes_argument_does_not_crash():
 
 
 def test_looks_numeric_amount():
-    assert looks_numeric("59.99") is True
+    assert looks_numeric("64.95") is True
 
 
 def test_looks_numeric_pure_digits():
@@ -88,7 +88,7 @@ def test_looks_numeric_pure_digits():
 
 
 def test_looks_numeric_rejects_words():
-    assert looks_numeric("PLUM TOMATOES") is False
+    assert looks_numeric("CHERRY PEPPERS") is False
     assert looks_numeric("") is False
 
 

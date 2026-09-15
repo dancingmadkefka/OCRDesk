@@ -233,7 +233,7 @@ would have kept:
   Alignment falls back, in order, to a hypothesis label-value pair and to the first
   amount following the label in prose, so a total a model kept as a paragraph still
   counts. Critical fields come from total cells in tables and from totals outside
-  tables ('Total: EUR66.71'), each carrying its GT label in the sidecar; a table's last
+  tables ('Total: EUR57.43'), each carrying its GT label in the sidecar; a table's last
   row only becomes a total when it names one.
   `tests/grader/fixtures/we_missing_row` shows the consequence: an omitted line
   item no longer cascades into aligned-cell failures; it fires the non-critical
@@ -289,7 +289,7 @@ would have kept:
   as a label-value line or prose. Models merge tables and keep payslip
   summaries as paragraphs, and A1 already accepted those; A2 rejecting them
   made A1's fallbacks pointless. (2026-09-15)
-- **A VAT letter across non-breaking spaces is attached.** `221.96&nbsp;&nbsp;H`
+- **A VAT letter across non-breaking spaces is attached.** `187.45&nbsp;&nbsp;H`
   is the same line; only a block or newline boundary detaches. (2026-09-15)
 - **The prose fallback matches the label on the words at that point.** It
   used to match a GT label against the following 120 characters, which let a

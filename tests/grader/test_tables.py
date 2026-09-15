@@ -190,7 +190,7 @@ def test_last_numeric_row_fallback_noop_without_numeric_cell():
 
 
 def test_cell_tokens_have_correct_cell_ref():
-    html = "<table><tr><td>Price</td><td>59.99 D</td></tr></table>"
+    html = "<table><tr><td>Price</td><td>64.95 D</td></tr></table>"
     table = build_table(_parse_table(html), index=2, role_map=ROLE_MAP)
     grid = _grid(table)
     tokens = grid[(0, 1)].tokens
@@ -202,7 +202,7 @@ def test_cell_tokens_have_correct_cell_ref():
 
 
 def test_synthesized_span_cell_tokens_have_own_cell_ref():
-    html = '<table><tr><td rowspan="2">59.99 D</td><td>x</td></tr><tr><td>y</td></tr></table>'
+    html = '<table><tr><td rowspan="2">64.95 D</td><td>x</td></tr><tr><td>y</td></tr></table>'
     table = build_table(_parse_table(html), index=0, role_map=ROLE_MAP)
     grid = _grid(table)
     origin_tokens = grid[(0, 0)].tokens
@@ -217,7 +217,7 @@ def test_synthesized_span_cell_tokens_have_own_cell_ref():
 
 
 def test_is_numeric_flag_set_for_numeric_cell():
-    html = "<table><tr><td>PLUM TOMATOES</td><td>1.79</td></tr></table>"
+    html = "<table><tr><td>CHERRY PEPPERS</td><td>1.79</td></tr></table>"
     table = build_table(_parse_table(html), index=0, role_map=ROLE_MAP)
     grid = _grid(table)
     assert grid[(0, 0)].is_numeric is False

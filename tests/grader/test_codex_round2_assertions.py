@@ -145,14 +145,14 @@ def test_spurious_amounts_consistent_with_fin_em_currency_rule(ir_factory):
 
 
 def test_a5_fails_when_repeated_amount_has_only_one_hyp_vat_occurrence(ir_factory):
-    # GT: two attached '59.99 A' occurrences (e.g. two identical priced items on a receipt).
+    # GT: two attached '64.95 A' occurrences (e.g. two identical priced items on a receipt).
     # hyp: only one. The second GT occurrence must not reuse the first's hyp token.
     gt = ir_factory.document(fin_tokens=[
-        ir_factory.fin_token(type="vat_letter", cents=5999, vat_letter="A", attached=True),
-        ir_factory.fin_token(type="vat_letter", cents=5999, vat_letter="A", attached=True),
+        ir_factory.fin_token(type="vat_letter", cents=6495, vat_letter="A", attached=True),
+        ir_factory.fin_token(type="vat_letter", cents=6495, vat_letter="A", attached=True),
     ])
     hyp = ir_factory.document(fin_tokens=[
-        ir_factory.fin_token(type="vat_letter", cents=5999, vat_letter="A", attached=True),
+        ir_factory.fin_token(type="vat_letter", cents=6495, vat_letter="A", attached=True),
     ])
     result = get(run_assertions(gt, hyp, ir_factory.sidecar()), "A5")
     assert result.passed is False
@@ -162,12 +162,12 @@ def test_a5_passes_when_repeated_amount_has_matching_hyp_occurrences(ir_factory)
     # Sanity check: consuming hyp tokens on match must not break the legitimate case where
     # every repeat really is reproduced.
     gt = ir_factory.document(fin_tokens=[
-        ir_factory.fin_token(type="vat_letter", cents=5999, vat_letter="A", attached=True),
-        ir_factory.fin_token(type="vat_letter", cents=5999, vat_letter="A", attached=True),
+        ir_factory.fin_token(type="vat_letter", cents=6495, vat_letter="A", attached=True),
+        ir_factory.fin_token(type="vat_letter", cents=6495, vat_letter="A", attached=True),
     ])
     hyp = ir_factory.document(fin_tokens=[
-        ir_factory.fin_token(type="vat_letter", cents=5999, vat_letter="A", attached=True),
-        ir_factory.fin_token(type="vat_letter", cents=5999, vat_letter="A", attached=True),
+        ir_factory.fin_token(type="vat_letter", cents=6495, vat_letter="A", attached=True),
+        ir_factory.fin_token(type="vat_letter", cents=6495, vat_letter="A", attached=True),
     ])
     result = get(run_assertions(gt, hyp, ir_factory.sidecar()), "A5")
     assert result.passed is True

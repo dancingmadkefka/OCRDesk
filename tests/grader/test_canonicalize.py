@@ -23,7 +23,7 @@ def _doc(html: str, sidecar: Sidecar | None = None):
 
 _FRAGMENT_HTML = (
     '<style>.x{color:red}</style>'
-    '<div class="header">Aldi Stores (Ireland) Ltd</div>'
+    '<div class="header">Corner Grocer Ltd</div>'
     '<table><tr><td>Milk</td><td>2.00</td></tr></table>'
     '<p>Total: EUR2.00</p>'
 )
@@ -166,14 +166,14 @@ def test_definition_list_multiple_dd_per_dt():
 
 
 def test_colon_pattern_pair():
-    doc = _doc("<p>Card Number: ************2840</p>")
+    doc = _doc("<p>Card Number: ************5173</p>")
     pairs = [p for p in doc.label_value_pairs if p.source == "colon_pattern"]
     assert pairs[0].label == "Card Number"
-    assert pairs[0].value == "************2840"
+    assert pairs[0].value == "************5173"
 
 
 def test_colon_pattern_does_not_double_fire_on_wrapping_div():
-    doc = _doc("<div><p>Merchant ID: 26020</p></div>")
+    doc = _doc("<div><p>Merchant ID: 73915</p></div>")
     pairs = [p for p in doc.label_value_pairs if p.source == "colon_pattern"]
     assert len(pairs) == 1
 
@@ -187,11 +187,11 @@ def test_sibling_heuristic_pair_with_unrelated_classes():
     # Mirrors cases 010/027/006: unrelated class names, no colon, adjacent
     # block siblings where sibling 1 has no trailing digit and sibling 2 is
     # value-shaped.
-    html = '<div class="foo-weird">Merchant ID</div><div class="bar-odd">26020</div>'
+    html = '<div class="foo-weird">Merchant ID</div><div class="bar-odd">73915</div>'
     doc = _doc(html)
     pairs = [p for p in doc.label_value_pairs if p.source == "sibling_heuristic"]
     assert pairs[0].label == "Merchant ID"
-    assert pairs[0].value == "26020"
+    assert pairs[0].value == "73915"
 
 
 def test_sibling_heuristic_requires_value_shaped_second_sibling():
@@ -240,7 +240,7 @@ def test_no_line_items_under_three_data_rows():
 
 
 def test_fin_tokens_include_cell_ref_inside_tables_and_none_outside():
-    html = "<table><tr><td>Milk</td><td>2.00</td></tr></table><p>Ref: 20111669548</p>"
+    html = "<table><tr><td>Milk</td><td>2.00</td></tr></table><p>Ref: 30458812736</p>"
     doc = _doc(html)
     amount = next(t for t in doc.fin_tokens if t.type == "amount")
     ref = next(t for t in doc.fin_tokens if t.type == "reference_id")
@@ -250,7 +250,7 @@ def test_fin_tokens_include_cell_ref_inside_tables_and_none_outside():
 
 
 def test_fin_tokens_not_duplicated_between_table_and_outside_pass():
-    html = "<table><tr><td>59.99 D</td></tr></table>"
+    html = "<table><tr><td>64.95 D</td></tr></table>"
     doc = _doc(html)
     amounts = [t for t in doc.fin_tokens if t.type == "amount"]
     assert len(amounts) == 1

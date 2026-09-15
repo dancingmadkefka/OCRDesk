@@ -93,8 +93,8 @@ def _value_in_cell(value: str, cell: Cell) -> bool:
     of the cell's own amount tokens by cents, or by canonical text -- never by raw substring,
     so a wrong total such as '112.34' or '-12.34' can no longer satisfy a '12.34' critical
     value merely because one string contains the other; sign matters, so '-12.34' does not
-    match '12.34' either. Locale formatting is still accepted as the same amount ('3637.00'
-    matches '3,637.00', "1'932.24" and '3637,00' alike, since those parse to identical cents --
+    match '12.34' either. Locale formatting is still accepted as the same amount ('4215.00'
+    matches '4,215.00', "1'874.36" and '4215,00' alike, since those parse to identical cents --
     that is normalization, not a placement error). A non-amount value (a reference id, a date,
     a free-text label) still matches as whitespace-insensitive text or as a token canonical.
     """
@@ -215,7 +215,7 @@ def _value_in_labelled_row(value: str, gt_label: str, gt_col_header: str, hyp: D
                 continue
             row_label = " ".join(c.text_norm for c in cells if c.text_norm.strip() and not c.is_numeric)
             if not _label_matches(gt_label, row_label):
-                # a value cell may carry its own label text ("Total 66.71"); check the cell text too
+                # a value cell may carry its own label text ("Total 57.43"); check the cell text too
                 if not any(_label_matches(gt_label, c.text_norm) for c in hits):
                     seen_labels.append(row_label or "(no label)")
                     continue
@@ -287,7 +287,7 @@ def _usable_label(gt_label: str) -> str:
 
 
 def _value_beside_label_outside_tables(value: str, gt_label: str, hyp: Document) -> bool:
-    """The value sits beside its label outside any table: as a label-value line ('Total: 66.71')
+    """The value sits beside its label outside any table: as a label-value line ('Total: 57.43')
     or as prose ('<p>Net Pay <span>1650.40</span></p>'). Shared by A1 and A2."""
     if not gt_label:
         return False
@@ -342,7 +342,7 @@ def _check_a1(gt: Document, hyp: Document, sidecar: Sidecar) -> AssertionResult:
         if not aligned:
             aligned = _value_beside_label_outside_tables(cf.value, gt_label, hyp)
         if not aligned and not gt_label:
-            # a critical value that carries no label anywhere (a bare 'CHF 32.40' on a terminal receipt)
+            # a critical value that carries no label anywhere (a bare 'CHF 28.60' on a terminal receipt)
             # can only be required to be present; the multiplicity check below still applies
             aligned = _count_value_occurrences(cf.value, hyp) > 0
             note = "value not found anywhere in the hypothesis"
@@ -502,13 +502,13 @@ def _check_a5(gt: Document, hyp: Document) -> AssertionResult:
     # Adjacency compares against the GT token's own `attached` flag, not a
     # re-derived adjacency pattern -- the no-space/space/block distinction is
     # collapsed into that boolean upstream, by fintoken.py (Scope A). The
-    # letter itself must also match: it carries the VAT rate, so "59.99 D"
-    # reproduced as "59.99 E" (same cents, same adjacency) is a real content
+    # letter itself must also match: it carries the VAT rate, so "64.95 D"
+    # reproduced as "64.95 E" (same cents, same adjacency) is a real content
     # error, not a mere adjacency question.
     #
     # GT tokens are matched against hyp tokens as a multiset on (cents, letter,
     # attached): each matched hyp token is removed from its cents bucket so it
-    # cannot also satisfy a second, repeated GT occurrence. Two GT "59.99 A"
+    # cannot also satisfy a second, repeated GT occurrence. Two GT "64.95 A"
     # tokens with only one attached "A" in the hypothesis therefore leave the
     # second GT token with nothing left to match, and it fails like any other
     # missing occurrence.

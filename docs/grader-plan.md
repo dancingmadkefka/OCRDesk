@@ -301,7 +301,7 @@ Unit tests per module under `tests/grader/` mirror the module map. Synthetic fix
 2. **Grid-position alignment under row omission.** One missing hyp row shifts every later row's index, producing cascading A1 failures instead of one. Accepted MVP limitation, made explicit by the `we_missing_row` fixture.
 3. **Table matching by document order only.** Reordered or merged/split tables misalign. Flagged, not fixed.
 4. **`roles.yaml` thin coverage.** Heuristics carry most weight. Verify against `shadow` output before trusting rankings, not only against synthetic fixtures.
-5. **VAT-letter adjacency.** Must match the GT's own attached / block-separated pattern; needs the `"59.99D"` / `"59.99 D"` / `"59.99\nD"` triad as explicit unit cases.
+5. **VAT-letter adjacency.** Must match the GT's own attached / block-separated pattern; needs the `"64.95D"` / `"64.95 D"` / `"64.95\nD"` triad as explicit unit cases.
 6. **Markdown → HTML fidelity.** New code with no upstream to reuse; needs a CRLF-input test.
 7. **APTED cost.** The largest real table is ~31 rows × 6 cols; add a per-table node cap and a timeout that yields `CATASTROPHIC` as cheap insurance.
 8. **`Levenshtein` package.** Imported by `table_recognition_metric`; present in `.venv`; must be pinned in `requirements-grader.txt` with `apted` and `lxml`.

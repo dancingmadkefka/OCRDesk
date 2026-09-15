@@ -85,13 +85,13 @@ def test_discover_corpus_uses_the_single_meta_json_when_stem_named_one_is_absent
 def test_a1_matches_locale_formatted_totals_by_cents():
     from ocrgrade.ir import CellRef, CriticalField
 
-    gt_html = "<table><tr><td>Combined Total</td><td class=\"final-val\">3,637.00</td></tr></table>"
+    gt_html = "<table><tr><td>Overall Total</td><td class=\"final-val\">4,215.00</td></tr></table>"
     gt, hyp, side = _docs(gt_html, gt_html)
-    side.critical_fields = [CriticalField("grand_total", "3637.00", CellRef(0, 0, 1))]
+    side.critical_fields = [CriticalField("grand_total", "4215.00", CellRef(0, 0, 1))]
     result = {a.id: a for a in assertions.run_assertions(gt, hyp, side)}
     assert result["A1"].passed, result["A1"].detail
     # a changed digit still fails
-    gt2, hyp2, side2 = _docs(gt_html, gt_html.replace("3,637.00", "3,673.00"))
+    gt2, hyp2, side2 = _docs(gt_html, gt_html.replace("4,215.00", "4,251.00"))
     side2.critical_fields = side.critical_fields
     assert not {a.id: a for a in assertions.run_assertions(gt2, hyp2, side2)}["A1"].passed
 
@@ -99,14 +99,14 @@ def test_a1_matches_locale_formatted_totals_by_cents():
 def test_two_digit_year_dates_and_swiss_uid_are_not_amounts():
     from ocrgrade import fintoken
 
-    toks = fintoken.extract_tokens("Datum: 6.6.25 Rechnung CHE-116.303.292 Betrag CHF 1'932.24 Total 60.00")
+    toks = fintoken.extract_tokens("Datum: 6.6.25 Rechnung CHE-482.915.736 Betrag CHF 1'874.36 Total 60.00")
     by_type = {}
     for t in toks:
         by_type.setdefault(t.type, []).append(t.raw)
     assert by_type.get("date") == ["6.6.25"]
-    assert "CHE-116.303.292" in by_type.get("reference_id", [])
+    assert "CHE-482.915.736" in by_type.get("reference_id", [])
     amounts = [t.cents for t in toks if t.type == "amount"]
-    assert amounts == [193224, 6000], amounts
+    assert amounts == [187436, 6000], amounts
 
 
 def test_grouped_integer_amounts_need_a_currency_marker():
@@ -171,8 +171,8 @@ def test_aifa_reader_honours_declared_markdown_form_when_text_looks_plain(tmp_pa
 
 def test_last_row_line_item_is_not_promoted_to_total():
     html = """<table>
-<tr><td>47366</td><td>PREMIUM PORRIDGE OATS</td><td>1.19 E</td></tr>
-<tr><td>84693</td><td>#DRONE CAMERA</td><td>59.99 D</td></tr></table>"""
+<tr><td>51208</td><td>WHOLEGRAIN RICE CAKES</td><td>1.19 E</td></tr>
+<tr><td>62417</td><td>#DESK LAMP</td><td>64.95 D</td></tr></table>"""
     gt, _, side = _docs(html, html)
     assert not [c for t in gt.tables for c in t.cells if c.role == "total_value"]
     html2 = "<table><tr><td>Item</td><td>1.19</td></tr><tr><td>Total</td><td>1.19</td></tr></table>"
@@ -183,55 +183,55 @@ def test_last_row_line_item_is_not_promoted_to_total():
 def test_row_label_prefers_short_label_over_paragraph_and_total_synonyms_match():
     from ocrgrade.ir import CellRef, CriticalField
 
-    gt_html = ("<table><tr><td>Did you know? Register or login today where you can check your balance "
-               "and view your bill and make secure payments</td><td>Total Bill amount to be taken from your bank a/c.</td>"
-               "<td class=\"final-val\">133.93</td></tr></table>")
-    hyp_html = "<table><tr><td>TOTAL DUE</td><td>133.93</td></tr></table>"
+    gt_html = ("<table><tr><td>Heard the news? Sign up or log in today where you can check your balance "
+               "and view your bill and make secure payments</td><td>Total amount to be collected from your bank account.</td>"
+               "<td class=\"final-val\">121.47</td></tr></table>")
+    hyp_html = "<table><tr><td>TOTAL DUE</td><td>121.47</td></tr></table>"
     gt, hyp, side = _docs(gt_html, hyp_html)
-    assert assertions._row_label(gt.tables[0], 0, 2) == "Total Bill amount to be taken from your bank a/c."
+    assert assertions._row_label(gt.tables[0], 0, 2) == "Total amount to be collected from your bank account."
     assert assertions._label_matches("Closing Balance", "Opening Balance") is False
     assert assertions._label_matches("Total", "Subtotal") is False
     assert assertions._label_matches("Net pay", "Gross pay") is False
-    assert assertions._label_matches("Total Bill amount to be taken from your bank a/c.", "TOTAL DUE") is True
-    side.critical_fields = [CriticalField("grand_total", "133.93", CellRef(0, 0, 2))]
+    assert assertions._label_matches("Total amount to be collected from your bank account.", "TOTAL DUE") is True
+    side.critical_fields = [CriticalField("grand_total", "121.47", CellRef(0, 0, 2))]
     assert {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A1"].passed
 
 
 def test_colspan_title_row_is_not_a_column_header_and_out_of_table_total_is_accepted():
     from ocrgrade.ir import CellRef, CriticalField
 
-    gt_html = ("<table><tr><th colspan=\"2\">Explanation Panels</th></tr>"
-               "<tr><td>Combined Total</td><td class=\"final-val\">3,637.00</td></tr></table>")
-    hyp_html = "<p>Explanation Panels</p><p>Combined Total: 3,637.00</p>"
+    gt_html = ("<table><tr><th colspan=\"2\">Summary Panels</th></tr>"
+               "<tr><td>Overall Total</td><td class=\"final-val\">4,215.00</td></tr></table>")
+    hyp_html = "<p>Summary Panels</p><p>Overall Total: 4,215.00</p>"
     gt, hyp, side = _docs(gt_html, hyp_html)
     assert assertions._col_header(gt.tables[0], 1) == ""
-    side.critical_fields = [CriticalField("grand_total", "3637.00", CellRef(0, 1, 1))]
+    side.critical_fields = [CriticalField("grand_total", "4215.00", CellRef(0, 1, 1))]
     assert {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A1"].passed
 
 
 def test_out_of_table_total_becomes_a_critical_field_and_a1_checks_it():
-    gt_html = "<h2>SALE</h2><p>Goods: 66.71</p><p>Total: EUR66.71</p><table><tr><td>6 Items</td><td>66.71</td></tr></table>"
+    gt_html = "<h2>SALE</h2><p>Goods: 57.43</p><p>Total: EUR57.43</p><table><tr><td>6 Items</td><td>57.43</td></tr></table>"
     gt, _, _ = _docs(gt_html, gt_html)
     side = sc.derive("c", gt_html, {})
     fields = [(c.role, c.value, c.cell_ref, c.label) for c in side.critical_fields]
-    assert ("grand_total", "66.71", None, "Total") in fields, fields
-    ok_hyp = "<p>Goods: 66.71</p><p>Total: EUR 66.71</p><p>6 Items 66.71</p>"  # GT prints it three times
-    bad_hyp = "<p>Goods: 66.71</p><p>Total: EUR 67.71</p><p>6 Items 66.71</p>"
+    assert ("grand_total", "57.43", None, "Total") in fields, fields
+    ok_hyp = "<p>Goods: 57.43</p><p>Total: EUR 57.43</p><p>6 Items 57.43</p>"  # GT prints it three times
+    bad_hyp = "<p>Goods: 57.43</p><p>Total: EUR 58.43</p><p>6 Items 57.43</p>"
     for html, expect in ((ok_hyp, True), (bad_hyp, False)):
         _, hyp, _ = _docs(gt_html, html)
         assert {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A1"].passed is expect, html
 
 
 def test_subtotal_spellings_and_prose_totals():
-    assert assertions._label_matches("Sub-total cardholder balances", "Subtotal cardholder balances") is True
+    assert assertions._label_matches("Sub-total member balances", "Subtotal member balances") is True
     assert assertions._label_matches("Subtotal", "Total") is False
-    gt_html = "<table><tr><td>Total-EFT CHF</td><td class=\"final-val\">362.00</td></tr></table>"
-    hyp_html = "<p>Payment</p><p>Total-EFT CHF 362.00</p>"
+    gt_html = "<table><tr><td>Total-EFT CHF</td><td class=\"final-val\">418.00</td></tr></table>"
+    hyp_html = "<p>Payment</p><p>Total-EFT CHF 418.00</p>"
     gt, hyp, side = _docs(gt_html, hyp_html)
     side = sc.derive("c", gt_html, {})
     assert side.critical_fields and side.critical_fields[0].label == "Total-EFT CHF"
     assert {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A1"].passed
-    _, hyp_bad, _ = _docs(gt_html, "<p>Payment</p><p>Total-EFT CHF 326.00</p>")
+    _, hyp_bad, _ = _docs(gt_html, "<p>Payment</p><p>Total-EFT CHF 481.00</p>")
     assert not {a.id: a for a in assertions.run_assertions(gt, hyp_bad, side)}["A1"].passed
 
 
@@ -241,11 +241,11 @@ def test_subtotal_spellings_and_prose_totals():
 def test_negative_and_parenthesised_amounts_keep_their_sign():
     from ocrgrade import fintoken
 
-    toks = {t.raw: t for t in fintoken.extract_tokens("Debit -12.34 Credit 12.34 Fee (5.00) Total-EFT CHF 362.00 range 10-20.00")}
+    toks = {t.raw: t for t in fintoken.extract_tokens("Debit -12.34 Credit 12.34 Fee (5.00) Total-EFT CHF 418.00 range 10-20.00")}
     assert toks["-12.34"].cents == -1234 and toks["-12.34"].canonical == "-12.34"
     assert toks["12.34"].cents == 1234
     assert toks["(5.00)"].cents == -500
-    assert [t.cents for t in toks.values() if t.raw.endswith("362.00")] == [36200]  # 'Total-EFT' is a word, not a sign
+    assert [t.cents for t in toks.values() if t.raw.endswith("418.00")] == [41800]  # 'Total-EFT' is a word, not a sign
     assert toks["20.00"].cents == 2000  # '10-20.00' is a range
     gt_html = "<table><tr><td>Balance</td><td class=\"final-val\">-12.34</td></tr></table>"
     gt, hyp_ok, side = _docs(gt_html, gt_html)
@@ -303,7 +303,7 @@ def test_teds_timeout_makes_the_case_catastrophic(monkeypatch):
 
 
 NESTED_GT = ("<table><tr><td>Summary</td><td><table><tr><td>Net Pay</td><td>1234.56</td></tr></table></td></tr>"
-             "<tr><td>Payable by EFT</td><td>1234.56</td></tr></table>")
+             "<tr><td>Paid by transfer</td><td>1234.56</td></tr></table>")
 
 
 def test_nested_table_content_belongs_to_the_nested_table_only():
@@ -316,7 +316,7 @@ def test_nested_table_content_belongs_to_the_nested_table_only():
 def test_flattened_nested_tables_keep_a1_when_every_printing_survives():
     side = sc.derive("t", NESTED_GT)
     flat = ("<table><tr><td>Net Pay</td><td>1234.56</td></tr>"
-            "<tr><td>Payable by EFT</td><td>1234.56</td></tr></table>")
+            "<tr><td>Paid by transfer</td><td>1234.56</td></tr></table>")
     gt, hyp, _ = _docs(NESTED_GT, flat)
     a1 = {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A1"]
     assert a1.passed, a1.detail
@@ -391,9 +391,9 @@ def test_prose_totals_are_found_after_any_occurrence_of_their_label():
 def test_vat_letter_after_non_breaking_spaces_is_still_attached():
     from ocrgrade import fintoken
 
-    toks = {t.type: t for t in fintoken.extract_tokens("219.90\u00a0\u00a0H")}
+    toks = {t.type: t for t in fintoken.extract_tokens("217.80\u00a0\u00a0H")}
     assert toks["vat_letter"].attached is True and toks["vat_letter"].vat_letter == "H"
-    toks = {t.type: t for t in fintoken.extract_tokens("219.90\nH")}
+    toks = {t.type: t for t in fintoken.extract_tokens("217.80\nH")}
     assert toks["vat_letter"].attached is False
 
 
@@ -419,7 +419,7 @@ def test_a2_accepts_gt_totals_kept_as_prose_or_in_a_merged_table():
 def _review_corpus(tmp_path: Path) -> Path:
     corpus = tmp_path / "corpus"
     for case, html in (("case-001", NESTED_GT),
-                       ("case-002", "<h2>Quittung</h2><table><tr><td>Total CHF</td><td>19.90</td></tr></table>")):
+                       ("case-002", "<h2>Quittung</h2><table><tr><td>Total CHF</td><td>17.80</td></tr></table>")):
         d = corpus / case
         d.mkdir(parents=True)
         (d / f"{case}-doc.html").write_text(html, encoding="utf-8")
@@ -493,11 +493,11 @@ def test_confirm_rejects_a_bad_value_and_writes_nothing(tmp_path: Path, capsys):
 def test_label_less_critical_value_only_has_to_be_present():
     from ocrgrade.ir import CriticalField
 
-    gt_html = "<p>Aare-Taxi</p><p>Visa Contactless</p><p>CHF 32.40</p>"
-    gt, hyp, side = _docs(gt_html, "<p>Aare-Taxi</p><p>Visa Contactless</p><p>CHF 32.40</p>")
-    side.critical_fields = [CriticalField(role="grand_total", value="32.40", cell_ref=None, label="")]
+    gt_html = "<p>Rhine-Cab</p><p>Card contactless</p><p>CHF 28.60</p>"
+    gt, hyp, side = _docs(gt_html, "<p>Rhine-Cab</p><p>Card contactless</p><p>CHF 28.60</p>")
+    side.critical_fields = [CriticalField(role="grand_total", value="28.60", cell_ref=None, label="")]
     a1 = {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A1"]
     assert a1.passed, a1.detail
-    _, hyp, _ = _docs(gt_html, "<p>Aare-Taxi</p><p>Visa Contactless</p><p>CHF 32.90</p>")
+    _, hyp, _ = _docs(gt_html, "<p>Rhine-Cab</p><p>Card contactless</p><p>CHF 28.90</p>")
     a1 = {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A1"]
     assert not a1.passed and "not found anywhere" in a1.detail

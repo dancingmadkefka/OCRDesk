@@ -428,7 +428,7 @@ def _infer_category(document: "Document", manifest_entry: dict[str, Any]) -> tup
 
 def _build_critical_fields(document: "Document") -> list[CriticalField]:
     """Critical fields = total cells in tables (role total_value with an amount) plus totals that
-    live outside tables as label-value pairs ("Total: EUR66.71"). Each carries the label it sits
+    live outside tables as label-value pairs ("Total: EUR57.43"). Each carries the label it sits
     beside so A1 can align it by meaning rather than by grid position."""
     amount_counts: dict[str, int] = {}
     for token in document.fin_tokens:

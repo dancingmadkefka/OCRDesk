@@ -276,8 +276,8 @@ def test_a4_vacuous_pass_when_no_required_sections():
 
 
 def test_a5_passes_when_attached_pattern_reproduced():
-    gt = make_doc(fin_tokens=[make_fin_token(type="vat_letter", cents=5999, vat_letter="D", attached=True)])
-    hyp = make_doc(fin_tokens=[make_fin_token(type="vat_letter", cents=5999, vat_letter="D", attached=True)])
+    gt = make_doc(fin_tokens=[make_fin_token(type="vat_letter", cents=6495, vat_letter="D", attached=True)])
+    hyp = make_doc(fin_tokens=[make_fin_token(type="vat_letter", cents=6495, vat_letter="D", attached=True)])
     result = get(run_assertions(gt, hyp, make_sidecar()), "A5")
     assert result.passed is True
 
@@ -285,18 +285,18 @@ def test_a5_passes_when_attached_pattern_reproduced():
 def test_a5_fails_when_vat_letter_detached_in_hyp():
     # we10: VAT letter detached from the price (GT has it attached, hyp
     # reproduces the same cents value but with a space/block separation).
-    gt = make_doc(fin_tokens=[make_fin_token(type="vat_letter", cents=5999, vat_letter="D", attached=True)])
-    hyp = make_doc(fin_tokens=[make_fin_token(type="vat_letter", cents=5999, vat_letter="D", attached=False)])
+    gt = make_doc(fin_tokens=[make_fin_token(type="vat_letter", cents=6495, vat_letter="D", attached=True)])
+    hyp = make_doc(fin_tokens=[make_fin_token(type="vat_letter", cents=6495, vat_letter="D", attached=False)])
     result = get(run_assertions(gt, hyp, make_sidecar()), "A5")
     assert result.passed is False
 
 
 def test_a5_fails_when_letter_wrong_despite_correct_cents_and_adjacency():
-    # The letter carries the VAT rate: "59.99 D" reproduced as "59.99 E"
+    # The letter carries the VAT rate: "64.95 D" reproduced as "64.95 E"
     # (same cents, same adjacency pattern) is a real content error, not
     # merely an adjacency question, and must fail with both letters named.
-    gt = make_doc(fin_tokens=[make_fin_token(type="vat_letter", cents=5999, vat_letter="D", attached=True)])
-    hyp = make_doc(fin_tokens=[make_fin_token(type="vat_letter", cents=5999, vat_letter="E", attached=True)])
+    gt = make_doc(fin_tokens=[make_fin_token(type="vat_letter", cents=6495, vat_letter="D", attached=True)])
+    hyp = make_doc(fin_tokens=[make_fin_token(type="vat_letter", cents=6495, vat_letter="E", attached=True)])
     result = get(run_assertions(gt, hyp, make_sidecar()), "A5")
     assert result.passed is False
     assert "D" in result.detail
@@ -304,14 +304,14 @@ def test_a5_fails_when_letter_wrong_despite_correct_cents_and_adjacency():
 
 
 def test_a5_fails_when_hyp_missing_the_amount_entirely():
-    gt = make_doc(fin_tokens=[make_fin_token(type="vat_letter", cents=5999, vat_letter="D", attached=True)])
+    gt = make_doc(fin_tokens=[make_fin_token(type="vat_letter", cents=6495, vat_letter="D", attached=True)])
     hyp = make_doc(fin_tokens=[])
     result = get(run_assertions(gt, hyp, make_sidecar()), "A5")
     assert result.passed is False
 
 
 def test_a5_vacuous_pass_when_no_attached_gt_vat_tokens():
-    gt = make_doc(fin_tokens=[make_fin_token(type="vat_letter", cents=5999, vat_letter="D", attached=False)])
+    gt = make_doc(fin_tokens=[make_fin_token(type="vat_letter", cents=6495, vat_letter="D", attached=False)])
     hyp = make_doc(fin_tokens=[])
     result = get(run_assertions(gt, hyp, make_sidecar()), "A5")
     assert result.passed is True
