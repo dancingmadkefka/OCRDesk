@@ -97,6 +97,20 @@ def _pair_matches(needle: LabelValuePair, haystack: list[LabelValuePair]) -> boo
     )
 
 
+def _consuming_hits(needles: list[LabelValuePair], haystack: list[LabelValuePair]) -> int:
+    """Needles matched against haystack pairs, each haystack pair usable once: a pair the GT prints
+    twice needs two counterparts."""
+    used: set[int] = set()
+    hits = 0
+    for needle in needles:
+        for i, candidate in enumerate(haystack):
+            if i not in used and _pair_matches(needle, [candidate]):
+                used.add(i)
+                hits += 1
+                break
+    return hits
+
+
 def _label_value_f1(
     gt_pairs: list[LabelValuePair], hyp_pairs: list[LabelValuePair]
 ) -> float | None:
@@ -105,8 +119,8 @@ def _label_value_f1(
     section 4, A6)."""
     if not gt_pairs and not hyp_pairs:
         return None
-    recall_hits = sum(1 for gp in gt_pairs if _pair_matches(gp, hyp_pairs))
-    precision_hits = sum(1 for hp in hyp_pairs if _pair_matches(hp, gt_pairs))
+    recall_hits = _consuming_hits(gt_pairs, hyp_pairs)
+    precision_hits = _consuming_hits(hyp_pairs, gt_pairs)
     recall = recall_hits / max(1, len(gt_pairs))
     precision = precision_hits / max(1, len(hyp_pairs))
     return (2 * precision * recall) / max(EPS, precision + recall)

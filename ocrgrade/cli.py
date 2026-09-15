@@ -561,6 +561,13 @@ def _cmd_rank(args, *, rank_key=None) -> int:
             return 2
         summaries.append(json.loads(path.read_text(encoding="utf-8")))
     summaries.sort(key=rank_key, reverse=True)
+    configs = sorted({report.config_id(s) for s in summaries})
+    if len(configs) > 1:
+        print(
+            f"warning: these runs were scored under {len(configs)} different grader configurations "
+            "(see the config column); re-score them together before comparing",
+            file=sys.stderr,
+        )
     report.write_leaderboard_csv(summaries, args.out)
     return 0
 

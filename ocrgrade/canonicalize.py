@@ -308,6 +308,59 @@ def _build_line_items(table_el: Tag, table: Table) -> list[LineItem]:
 # ---------------------------------------------------------------------------
 
 
+def _fin_tokens_in_reading_order(body: Tag, table_els: list[Tag], tables_list: list[Table], locale_hint: str | None) -> list[FinToken]:
+    """Financial tokens in document order. Prose keeps its position relative to the tables around
+    it; a table contributes its cell tokens where it starts, and tables nested inside it follow
+    right after (their text is not part of the parent's cells). Block boundaries emit a newline,
+    as in `extract_block_text`, so VAT-letter adjacency is judged the same way."""
+    from bs4 import Comment, NavigableString, ProcessingInstruction
+
+    from .tables import _BLOCK_TAGS, _SKIP_CONTENT_TAGS
+
+    index_of = {id(el): i for i, el in enumerate(table_els)}
+    out: list[FinToken] = []
+    buffer: list[str] = []
+    emitted: set[int] = set()
+
+    def flush() -> None:
+        if buffer:
+            out.extend(fintoken.extract_tokens("".join(buffer), locale_hint))
+            buffer.clear()
+
+    def emit_table(el: Tag) -> None:
+        i = index_of.get(id(el))
+        if i is None or i in emitted:
+            return
+        emitted.add(i)
+        out.extend(tok for cell in tables_list[i].cells if cell.is_span_origin for tok in cell.tokens)
+
+    def walk(node: Any) -> None:
+        name = getattr(node, "name", None)
+        if name is None:
+            if isinstance(node, NavigableString) and not isinstance(node, (Comment, ProcessingInstruction)):
+                buffer.append(str(node))
+            return
+        if name in _SKIP_CONTENT_TAGS:
+            return
+        if name == "table":
+            flush()
+            emit_table(node)
+            for nested in node.find_all("table"):
+                emit_table(nested)
+            return
+        is_block = name in _BLOCK_TAGS
+        if is_block:
+            buffer.append("\n")
+        for child in node.children:
+            walk(child)
+        if is_block:
+            buffer.append("\n")
+
+    walk(body)
+    flush()
+    return out
+
+
 def _table_cell_tokens(tables_list: list[Table]) -> list[FinToken]:
     out: list[FinToken] = []
     for table in tables_list:
@@ -381,10 +434,7 @@ def build_document(html: str, role_map: RoleMap, sidecar: Sidecar | None = None)
     for table_el, table in zip(table_els, tables_list):
         line_items.extend(_build_line_items(table_el, table))
 
-    outside_table_text = extract_block_text(body, extra_skip=frozenset({"table"}))
-    fin_tokens = _table_cell_tokens(tables_list) + fintoken.extract_tokens(
-        outside_table_text, locale_hint
-    )
+    fin_tokens = _fin_tokens_in_reading_order(body, table_els, tables_list, locale_hint)
 
     return Document(
         tables=tables_list,

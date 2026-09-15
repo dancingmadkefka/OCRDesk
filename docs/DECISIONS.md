@@ -324,6 +324,17 @@ would have kept:
 - **`CHF -12.34` keeps its currency.** A sign or accounting parenthesis
   between a currency marker and the number no longer drops the marker.
 
+- **Financial tokens are collected in reading order.** Prose keeps its place
+  relative to the tables around it (a table contributes its cells where it
+  starts, nested tables right after), so a hypothesis that moves a paragraph
+  of amounts past a table is visible to `cer_financial_tokens`. (Codex round 3)
+- **Outside-table totals and label-value pairs follow the same rules as cells.**
+  An amount beside its label outside a table matches as a token, never as a
+  substring; A6 and `label_value_f1` consume a hypothesis pair once.
+- **The ranked leaderboard carries a `config` column** built from each
+  summary's `config_hash`, and `rank` warns when the runs were scored under
+  different grader configurations.
+
 ## Open questions (not settled)
 
 - **Default right pane when GT exists:** Currently resets to Original image on navigation; user may want GT on the right by default for review.

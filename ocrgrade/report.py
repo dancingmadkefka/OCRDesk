@@ -37,6 +37,12 @@ def write_summary_json(summary: dict[str, Any], path: Path) -> None:
     path.write_text(json.dumps(summary, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
 
 
+def config_id(summary: dict[str, Any]) -> str:
+    """A deterministic identifier of the grader configuration a run was scored under."""
+    config_hash = summary.get("config_hash") or {}
+    return ";".join(f"{k}={config_hash[k]}" for k in sorted(config_hash)) or "unknown"
+
+
 def write_leaderboard_csv(summaries: list[dict[str, Any]], path: Path) -> None:
     """One row per summary.json. Category columns are the union across all
     summaries, sorted alphabetically, so `rank` can merge runs that cover
@@ -47,7 +53,7 @@ def write_leaderboard_csv(summaries: list[dict[str, Any]], path: Path) -> None:
         categories.update((summary.get("category_macro") or {}).keys())
     category_columns = sorted(categories)
 
-    columns = LEADERBOARD_FIXED_COLUMNS + [f"{c}_display_score" for c in category_columns]
+    columns = LEADERBOARD_FIXED_COLUMNS + [f"{c}_display_score" for c in category_columns] + ["config"]
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as fh:
@@ -67,6 +73,7 @@ def write_leaderboard_csv(summaries: list[dict[str, Any]], path: Path) -> None:
                 summary.get("worst_category_q"),
             ]
             row.extend(category_macro.get(c, "") for c in category_columns)
+            row.append(config_id(summary))
             writer.writerow(row)
 
 

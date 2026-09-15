@@ -291,12 +291,17 @@ def _value_beside_label_outside_tables(value: str, gt_label: str, hyp: Document)
     or as prose ('<p>Net Pay <span>1650.40</span></p>'). Shared by A1 and A2."""
     if not gt_label:
         return False
+    from ocrgrade.fintoken import extract_tokens
+
     cents = _cents_of(value)
     for pair in hyp.label_value_pairs:
-        if _label_matches(gt_label, pair.label) and (
-            _squash(value) in _squash(pair.value) or (cents is not None and cents == _cents_of(pair.value))
-        ):
-            return True
+        if not _label_matches(gt_label, pair.label):
+            continue
+        if cents is None:
+            if _squash(value) in _squash(pair.value):
+                return True
+        elif any(t.type == "amount" and t.cents == cents for t in extract_tokens(pair.value)):
+            return True  # an amount is matched as a token: 12.34 is not inside 112.34 or -12.34
     return _value_near_label_in_text(value, gt_label, hyp.body_text_norm)
 
 
@@ -551,11 +556,17 @@ def _check_a6(gt: Document, hyp: Document) -> AssertionResult:
     if not gt_pairs:
         return AssertionResult("A6", False, True, "no GT label-value pairs to check")
 
-    failures = [
-        f"label-value pair {gp.label!r} -> {gp.value!r} not reproduced in hyp"
-        for gp in gt_pairs
-        if not _pair_matches_lv(gp, hyp.label_value_pairs)
-    ]
+    failures = []
+    used: set[int] = set()  # each hypothesis pair reproduces one GT pair at most
+    for gp in gt_pairs:
+        match = next(
+            (i for i, hp in enumerate(hyp.label_value_pairs) if i not in used and _pair_matches_lv(gp, [hp])),
+            None,
+        )
+        if match is None:
+            failures.append(f"label-value pair {gp.label!r} -> {gp.value!r} not reproduced in hyp")
+        else:
+            used.add(match)
     passed = not failures
     detail = "all label-value pairs intact" if passed else "; ".join(failures)
     return AssertionResult("A6", False, passed, detail)
