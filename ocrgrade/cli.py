@@ -11,13 +11,14 @@ stand-ins (see tests/grader/conftest.py's `fake_pipeline` fixture).
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
 from ocrgrade import inputs, report, sidecar
 from ocrgrade.ir import CaseResult
@@ -101,6 +102,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_annotate.add_argument("--corpus", required=True, type=Path)
     p_annotate.add_argument("--manifest", type=Path, default=None, help="Optional ocr_manifest.json.")
 
+    p_confirm = sub.add_parser(
+        "confirm",
+        help="Apply the edited annotations_review.csv back to the sidecars (category, locale, currency, "
+             "decimal separator, VAT-letter scheme, confirmed, notes). Critical fields and sections stay as derived.",
+    )
+    p_confirm.add_argument("--corpus", required=True, type=Path)
+    p_confirm.add_argument("--csv", type=Path, default=None, help="Default: <corpus>/annotations_review.csv.")
+
     p_score = sub.add_parser("score", help="Score one hypothesis source against a corpus.")
     p_score.add_argument(
         "--corpus",
@@ -151,6 +160,8 @@ def main(
 
     if args.command == "annotate":
         return _cmd_annotate(args, build_document=build_document, load_role_map=load_role_map)
+    if args.command == "confirm":
+        return _cmd_confirm(args)
     if args.command == "score":
         return _cmd_score(
             args,
@@ -238,7 +249,61 @@ def _cmd_annotate(args, *, build_document=None, load_role_map=None) -> int:
         sidecar.save(derived, case_files.sidecar_path)
         all_sidecars.append(derived)
 
-    sidecar.write_review_csv(all_sidecars, corpus_dir / "annotations_review.csv")
+    documents = {cf.case_id: cf.gt_path.stem for cf in case_files_list}
+    sidecar.write_review_csv(all_sidecars, corpus_dir / "annotations_review.csv", documents)
+    return 0
+
+
+def _cmd_confirm(args) -> int:
+    """Copy the reviewer's edits from annotations_review.csv into the sidecars, then rewrite the
+    CSV from the sidecars so both stay in step. A single invalid value stops the whole run
+    before anything is written."""
+    corpus_dir: Path = args.corpus
+    if not corpus_dir.is_dir():
+        print(f"error: corpus directory not found: {corpus_dir}", file=sys.stderr)
+        return 2
+    csv_path: Path = args.csv or corpus_dir / "annotations_review.csv"
+    if not csv_path.is_file():
+        print(f"error: review CSV not found: {csv_path}", file=sys.stderr)
+        return 2
+    with csv_path.open(encoding="utf-8-sig", newline="") as fh:
+        rows = {r.get("case_id", "").strip(): r for r in csv.DictReader(fh)}
+
+    case_files_list = inputs.discover_corpus(corpus_dir)
+    loaded: list[tuple[Any, Any, list[str]]] = []
+    problems: list[str] = []
+    for case_files in case_files_list:
+        if not case_files.sidecar_path.is_file():
+            problems.append(f"{case_files.case_id}: no sidecar yet, run annotate first")
+            continue
+        sc = sidecar.load(case_files.sidecar_path)
+        row = rows.get(case_files.case_id)
+        changed: list[str] = []
+        if row is not None:
+            try:
+                changed = sidecar.apply_review_row(sc, row)
+            except ValueError as exc:
+                problems.append(f"{case_files.case_id}: {exc}")
+                continue
+        loaded.append((case_files, sc, changed))
+    if problems:
+        for problem in problems:
+            print(f"error: {problem}", file=sys.stderr)
+        print("nothing written", file=sys.stderr)
+        return 1
+
+    n_changed = 0
+    for case_files, sc, changed in loaded:
+        if changed:
+            sidecar.save(sc, case_files.sidecar_path)
+            n_changed += 1
+    documents = {cf.case_id: cf.gt_path.stem for cf in case_files_list}
+    sidecar.write_review_csv([sc for _, sc, _ in loaded], csv_path, documents)
+    n_confirmed = sum(1 for _, sc, _ in loaded if sc.confirmed)
+    unknown = sorted(set(rows) - {cf.case_id for cf in case_files_list} - {""})
+    print(f"applied {csv_path.name} to {len(loaded)} case(s): {n_changed} changed, {n_confirmed} confirmed")
+    if unknown:
+        print(f"warning: rows without a case in the corpus were ignored: {', '.join(unknown)}", file=sys.stderr)
     return 0
 
 

@@ -295,6 +295,12 @@ would have kept:
   stopping before the first number) and requires the amount to follow that
   label occurrence. (2026-09-15)
 
+- **Review lives in the CSV; `confirm` applies it.** The reviewer never has
+  to open 36 JSON files: `annotations_review.csv` shows the document, every
+  critical field and every required section per case, and `confirm` copies
+  the editable columns back. Derived columns stay read-only so a hand edit
+  cannot drift from the GT html. (2026-09-15)
+
 ## Open questions (not settled)
 
 - **Default right pane when GT exists:** Currently resets to Original image on navigation; user may want GT on the right by default for review.

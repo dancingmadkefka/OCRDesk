@@ -120,13 +120,22 @@ Workflow:
    column schema from the canonicalized `Document`). Every derived sidecar has
    `confirmed: false`.
 2. It writes `annotations_review.csv` at the corpus root, one row per case
-   (`case_id, category, category_secondary, locale, currency, decimal_sep,
-   vat_letter_scheme, n_critical_fields, n_required_sections,
-   n_label_value_pairs, confirmed, notes`) - open it, fix any wrong
-   heuristic guesses, and flip `confirmed` to `true` once a case's sidecar is
-   trustworthy (edit the JSON directly; the CSV is a review aid, not the
-   source of truth).
-3. `score` reads whatever sidecar exists (or schema defaults if none), and
+   (`case_id, document, category, category_secondary, locale, currency,
+   decimal_sep, vat_letter_scheme, critical_fields, required_sections,
+   n_critical_fields, n_required_sections, n_label_value_pairs, confirmed,
+   notes`). `critical_fields` spells out every total the gate will demand
+   (`grand_total 1234.56 'Net Pay' ; ...`) and `required_sections` every
+   heading A4 will look for. Open it, fix wrong guesses in the editable
+   columns (category, category_secondary, locale, currency, decimal_sep,
+   vat_letter_scheme), flip `confirmed` to `true` once the row is right, and
+   use `notes` for anything wrong in the read-only columns.
+3. `python -m ocrgrade confirm --corpus <dir> [--csv <file>]` copies the
+   editable columns back into the sidecars and rewrites the CSV from them.
+   One invalid value (an unknown category, a currency that is not a 3-letter
+   code) stops the run before anything is written. Critical fields and
+   required sections are derived, so fix those in the JSON (or leave a note)
+   and re-run `annotate` only for unconfirmed cases.
+4. `score` reads whatever sidecar exists (or schema defaults if none), and
    marks the result `provisional: true` whenever `confirmed` is `false` - so a
    leaderboard built before annotation finishes still runs, with everything
    flagged as provisional.

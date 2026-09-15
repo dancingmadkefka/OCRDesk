@@ -405,3 +405,77 @@ def test_a2_accepts_gt_totals_kept_as_prose_or_in_a_merged_table():
     _, hyp, _ = _docs(gt_html, merged.replace("1650.40", "1605.40"))
     a2 = {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A2"]
     assert not a2.passed and "1650.40" in a2.detail
+
+
+def _review_corpus(tmp_path: Path) -> Path:
+    corpus = tmp_path / "corpus"
+    for case, html in (("case-001", NESTED_GT),
+                       ("case-002", "<h2>Quittung</h2><table><tr><td>Total CHF</td><td>19.90</td></tr></table>")):
+        d = corpus / case
+        d.mkdir(parents=True)
+        (d / f"{case}-doc.html").write_text(html, encoding="utf-8")
+        (d / f"{case}-doc.jpg").write_bytes(b"\xff\xd8\xff")
+    return corpus
+
+
+def _rewrite_csv(path: Path, edit) -> None:
+    import csv
+
+    with path.open(encoding="utf-8", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    edit({r["case_id"]: r for r in rows})
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def test_review_csv_round_trip_confirms_sidecars(tmp_path: Path):
+    import csv
+    import json
+    from ocrgrade import cli
+
+    corpus = _review_corpus(tmp_path)
+    assert cli.main(["annotate", "--corpus", str(corpus)]) == 0
+    csv_path = corpus / "annotations_review.csv"
+    with csv_path.open(encoding="utf-8", newline="") as fh:
+        by_id = {r["case_id"]: r for r in csv.DictReader(fh)}
+    assert by_id["case-001"]["document"] == "case-001-doc"
+    assert "grand_total 1234.56 'Net Pay'" in by_id["case-001"]["critical_fields"]
+    assert by_id["case-002"]["required_sections"] == "Quittung" and by_id["case-002"]["confirmed"] == "False"
+
+    _rewrite_csv(csv_path, lambda rows: rows["case-002"].update(
+        category="receipt", locale="ch", currency="chf", confirmed="true", notes="checked against the scan"))
+    assert cli.main(["confirm", "--corpus", str(corpus)]) == 0
+    meta_path = corpus / "case-002" / "case-002-doc.meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert meta["confirmed"] is True and meta["category"] == "receipt" and meta["locale"] == "CH"
+    assert meta["currency"] == "CHF" and meta["notes"] == "checked against the scan"
+    assert json.loads((corpus / "case-001" / "case-001-doc.meta.json").read_text(encoding="utf-8"))["confirmed"] is False
+
+    # a later annotate keeps the confirmed sidecar even though the GT changed, and the CSV says so
+    (corpus / "case-002" / "case-002-doc.html").write_text("<p>Total 1.00</p>", encoding="utf-8")
+    assert cli.main(["annotate", "--corpus", str(corpus)]) == 0
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert meta["confirmed"] is True and meta["notes"] == "checked against the scan"
+    with csv_path.open(encoding="utf-8", newline="") as fh:
+        by_id = {r["case_id"]: r for r in csv.DictReader(fh)}
+    assert by_id["case-002"]["confirmed"] == "True" and by_id["case-002"]["notes"] == "checked against the scan"
+
+
+def test_confirm_rejects_a_bad_value_and_writes_nothing(tmp_path: Path, capsys):
+    import json
+    from ocrgrade import cli
+
+    corpus = _review_corpus(tmp_path)
+    assert cli.main(["annotate", "--corpus", str(corpus)]) == 0
+    csv_path = corpus / "annotations_review.csv"
+    _rewrite_csv(csv_path, lambda rows: (rows["case-001"].update(confirmed="true"),
+                                         rows["case-002"].update(category="receipts")))
+    capsys.readouterr()
+    assert cli.main(["confirm", "--corpus", str(corpus)]) == 1
+    err = capsys.readouterr().err
+    assert "case-002: category 'receipts'" in err and "nothing written" in err
+    for case in ("case-001", "case-002"):
+        meta = json.loads((corpus / case / f"{case}-doc.meta.json").read_text(encoding="utf-8"))
+        assert meta["confirmed"] is False

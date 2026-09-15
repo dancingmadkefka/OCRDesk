@@ -219,36 +219,58 @@ def annotator_fingerprint() -> str:
     return digest.hexdigest()[:12]
 
 
-def write_review_csv(sidecars: Iterable[Sidecar], path: Path) -> None:
-    """Write `annotations_review.csv` at the corpus root (section 2 column list)."""
-    columns = [
-        "case_id",
-        "category",
-        "category_secondary",
-        "locale",
-        "currency",
-        "decimal_sep",
-        "vat_letter_scheme",
-        "n_critical_fields",
-        "n_required_sections",
-        "n_label_value_pairs",
-        "confirmed",
-        "notes",
-    ]
+REVIEW_COLUMNS = [
+    "case_id",
+    "document",
+    "category",
+    "category_secondary",
+    "locale",
+    "currency",
+    "decimal_sep",
+    "vat_letter_scheme",
+    "critical_fields",
+    "required_sections",
+    "n_critical_fields",
+    "n_required_sections",
+    "n_label_value_pairs",
+    "confirmed",
+    "notes",
+]
+
+#: Columns `confirm` copies back into the sidecar. Everything else is derived and read-only.
+REVIEW_EDITABLE = ("category", "category_secondary", "locale", "currency", "decimal_sep",
+                   "vat_letter_scheme", "confirmed", "notes")
+KNOWN_CATEGORIES = frozenset(_MANIFEST_ALIASES.values())
+_BOOL_WORDS = {"true": True, "yes": True, "1": True, "false": False, "no": False, "0": False}
+
+
+def _critical_fields_text(sc: Sidecar) -> str:
+    return " ; ".join(f"{cf.role} {cf.value}" + (f" '{cf.label}'" if cf.label else "") for cf in sc.critical_fields)
+
+
+def write_review_csv(sidecars: Iterable[Sidecar], path: Path, documents: dict[str, str] | None = None) -> None:
+    """Write `annotations_review.csv` at the corpus root: one row per case with everything a
+    reviewer must judge (document stem, the guessed category/locale/currency/decimal separator/
+    VAT-letter scheme, the critical fields the gate depends on, the required sections) plus the
+    `confirmed` and `notes` columns `confirm` reads back."""
+    documents = documents or {}
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
-        writer.writerow(columns)
+        writer.writerow(REVIEW_COLUMNS)
         for sc in sidecars:
             writer.writerow(
                 [
                     sc.case_id,
+                    documents.get(sc.case_id, ""),
                     sc.category,
                     sc.category_secondary or "",
                     sc.locale,
                     sc.currency or "",
                     sc.decimal_sep,
                     sc.vat_letter_scheme,
+                    _critical_fields_text(sc),
+                    " | ".join(sc.required_sections),
                     len(sc.critical_fields),
                     len(sc.required_sections),
                     len(sc.label_value_pairs),
@@ -256,6 +278,58 @@ def write_review_csv(sidecars: Iterable[Sidecar], path: Path) -> None:
                     sc.notes,
                 ]
             )
+
+
+def apply_review_row(sc: Sidecar, row: dict[str, str]) -> list[str]:
+    """Copy the editable columns of one review-CSV row into the sidecar. Returns the names of the
+    fields that changed; raises ValueError for a value the schema rejects (nothing is written
+    by the caller in that case)."""
+    changed: list[str] = []
+
+    def cell(column: str) -> str | None:
+        value = row.get(column)
+        return None if value is None else value.strip()
+
+    def put(field: str, value) -> None:
+        if getattr(sc, field) != value:
+            setattr(sc, field, value)
+            changed.append(field)
+
+    category = cell("category")
+    if category:
+        if category not in KNOWN_CATEGORIES:
+            raise ValueError(f"category {category!r} is not one of {sorted(KNOWN_CATEGORIES)}")
+        put("category", category)
+    secondary = cell("category_secondary")
+    if secondary is not None:
+        if secondary and secondary not in KNOWN_CATEGORIES:
+            raise ValueError(f"category_secondary {secondary!r} is not one of {sorted(KNOWN_CATEGORIES)}")
+        put("category_secondary", secondary or None)
+    locale = cell("locale")
+    if locale:
+        if not re.fullmatch(r"[A-Za-z]{2,5}", locale):
+            raise ValueError(f"locale {locale!r} must be a 2-5 letter code such as IE, DE, CH or OTHER")
+        put("locale", locale.upper())
+    currency = cell("currency")
+    if currency is not None:
+        if currency and not re.fullmatch(r"[A-Za-z]{3}", currency):
+            raise ValueError(f"currency {currency!r} must be a 3-letter ISO code or empty")
+        put("currency", currency.upper() or None)
+    decimal_sep = cell("decimal_sep")
+    if decimal_sep:
+        if decimal_sep not in (".", ","):
+            raise ValueError(f"decimal_sep {decimal_sep!r} must be '.' or ','")
+        put("decimal_sep", decimal_sep)
+    for column in ("vat_letter_scheme", "confirmed"):
+        word = cell(column)
+        if word:
+            if word.lower() not in _BOOL_WORDS:
+                raise ValueError(f"{column} {word!r} must be true or false")
+            put(column, _BOOL_WORDS[word.lower()])
+    notes = cell("notes")
+    if notes is not None:
+        put("notes", notes)
+    return changed
 
 
 # --- derivation helpers -----------------------------------------------------
