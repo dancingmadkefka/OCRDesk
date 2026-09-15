@@ -36,6 +36,16 @@ def score_document(
         tier0_errors.append(f"parse failure: {hyp.parse_error or 'unknown'}")
     if hyp.truncated:
         tier0_errors.append("truncated output")
+    # Catastrophic detectors from the design's section I that are cheap enough for the MVP:
+    # runaway or near-empty output by length ratio, and CER_sim < 0.2 (CER > 0.8).
+    gt_len, hyp_len = len(gt.body_text_norm), len(hyp.body_text_norm)
+    if not tier0_errors and gt_len >= 40 and (hyp_len > 5 * gt_len or hyp_len < 0.1 * gt_len):
+        tier0_errors.append(f"runaway or near-empty output: {hyp_len} chars vs GT {gt_len}")
+    content = None
+    if not tier0_errors:
+        content = content_metrics(gt, hyp)
+        if content["cer"] > 0.8:
+            tier0_errors.append(f"CER {content['cer']:.2f} > 0.8 (cer_sim < 0.2)")
 
     if tier0_errors:
         return CaseResult(
@@ -59,7 +69,7 @@ def score_document(
             category=case_category,
         )
 
-    content = content_metrics(gt, hyp)
+    assert content is not None
     structure = structure_metrics(gt, hyp)
     assertion_results = run_assertions(gt, hyp, sidecar)
 

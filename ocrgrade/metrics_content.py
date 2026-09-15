@@ -169,7 +169,7 @@ def content_metrics(gt: Document, hyp: Document) -> dict:
     content_terms = [
         (fin_em_amounts, CONTENT_WEIGHTS["fin_em_amounts"], fin_em_amounts_na),
         (fin_em_ids_dates_pct, CONTENT_WEIGHTS["fin_em_ids_dates_pct"], fin_em_ids_dates_pct_na),
-        (1 - cer, CONTENT_WEIGHTS["cer_complement"], False),
+        (max(0.0, 1 - cer), CONTENT_WEIGHTS["cer_complement"], False),  # CER_sim = max(0, 1-CER)
         (content_f1, CONTENT_WEIGHTS["content_f1"], False),
     ]
     active_terms = [(value, weight) for value, weight, na in content_terms if not na]

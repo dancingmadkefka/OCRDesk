@@ -214,11 +214,15 @@ def _load_aifa_results(path: Path) -> tuple[list[HypothesisRecord], dict[str, An
 
         raw_field = case.get("hypothesis_raw")
         if raw_field:
+            hint = _sniff_hint(raw_field)
+            declared = case.get("output_form") or run_meta.get("output_form")
+            if hint == "plain" and declared in ("markdown", "html"):
+                hint = declared  # the harness knows the prompt's contract; sniffing only upgrades plain
             records.append(
                 HypothesisRecord(
                     case_id=case_id,
                     raw=raw_field,
-                    hint=_sniff_hint(raw_field),
+                    hint=hint,
                     status="ok",
                     runtime_seconds=runtime_seconds,
                     meta=case,

@@ -130,3 +130,38 @@ def test_manifest_document_type_is_the_category_prior():
     assert sc._infer_category(doc, {"document_type": "payslip"})[0] == "payslip"
     assert sc._infer_category(doc, {})[0] == "bank-statement"  # keywords only without a prior
 
+
+# --- remediation after grading the first real model output ---------------------------
+
+
+def test_runaway_output_is_catastrophic_and_never_negative():
+    from ocrgrade import scoring
+
+    gt_html = "<table><tr><td>Total Payable</td><td class=\"final-val\">327.50</td></tr></table>" + "<p>" + "invoice line text " * 10 + "</p>"
+    gt, hyp, side = _docs(gt_html, "<p>" + "garbage 12.34 " * 400 + "</p>")
+    r = scoring.score_document(gt, hyp, side)
+    assert r.tier == "CATASTROPHIC" and r.display_score == 0.0
+    assert any("runaway" in e or "CER" in e for e in r.errors)
+
+
+def test_high_cer_but_normal_length_is_catastrophic():
+    from ocrgrade import scoring
+
+    gt_html = "<p>" + "alpha beta gamma delta " * 8 + "</p>"
+    gt, hyp, side = _docs(gt_html, "<p>" + "zzzz yyyy xxxx wwww " * 8 + "</p>")
+    r = scoring.score_document(gt, hyp, side)
+    assert r.tier == "CATASTROPHIC" and r.display_score == 0.0
+
+
+def test_aifa_reader_honours_declared_markdown_form_when_text_looks_plain(tmp_path: Path):
+    import json
+    from ocrgrade import inputs
+
+    payload = {"model": "m", "quant": None, "prompt": "paddleocr_vl_ocr", "sampling": {},
+               "cases": [{"case_id": "case-001", "status": "ok", "hypothesis_html": "<pre>x</pre>",
+                          "hypothesis_raw": "Total 12.50\nThanks", "output_form": "markdown", "runtime_seconds": 1.0}]}
+    f = tmp_path / "html_vlm_x.json"
+    f.write_text(json.dumps(payload), encoding="utf-8")
+    records, meta = inputs._load_aifa_results(f)
+    assert records[0].hint == "markdown"
+
