@@ -108,6 +108,7 @@ class CriticalField:
     value: str
     cell_ref: CellRef | None
     expected_multiplicity: int = 1
+    label: str = ""  # GT row or pair label the value sits beside; lets A1 align fields outside tables
 
 
 @dataclass

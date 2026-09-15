@@ -230,6 +230,11 @@ would have kept:
   coordinates remain a fast path. The cell-content metric is row-aligned for the
   same reason. A same-row column swap is accepted on purpose. What is lost: a
   value duplicated into a second row with the same label is caught by A3, not A1.
+  Alignment falls back, in order, to a hypothesis label-value pair and to the first
+  amount following the label in prose, so a total a model kept as a paragraph still
+  counts. Critical fields come from total cells in tables and from totals outside
+  tables ('Total: EUR66.71'), each carrying its GT label in the sidecar; a table's last
+  row only becomes a total when it names one.
   `tests/grader/fixtures/we_missing_row` shows the consequence: an omitted line
   item no longer cascades into aligned-cell failures; it fires the non-critical
   A8, caps the display score at 74, and keeps the case off the archival-safe list.

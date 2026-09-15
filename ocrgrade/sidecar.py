@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable
 
 from ocrgrade.ir import CellRef, CriticalField, Sidecar
+from ocrgrade.roles import _TOTAL_KEYWORD_RE  # roles exists now; a module-level import keeps derive() free of lazy attribute lookups
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, no runtime dependency
     from ocrgrade.ir import Document
@@ -306,12 +307,16 @@ def _infer_category(document: "Document", manifest_entry: dict[str, Any]) -> tup
 
 
 def _build_critical_fields(document: "Document") -> list[CriticalField]:
+    """Critical fields = total cells in tables (role total_value with an amount) plus totals that
+    live outside tables as label-value pairs ("Total: EUR66.71"). Each carries the label it sits
+    beside so A1 can align it by meaning rather than by grid position."""
     amount_counts: dict[str, int] = {}
     for token in document.fin_tokens:
         if token.type == "amount" and token.canonical:
             amount_counts[token.canonical] = amount_counts.get(token.canonical, 0) + 1
 
     fields: list[CriticalField] = []
+    seen_values: set[str] = set()
     for table in document.tables:
         for cell in table.cells:
             if cell.role != "total_value" or not cell.is_span_origin:
@@ -319,17 +324,37 @@ def _build_critical_fields(document: "Document") -> list[CriticalField]:
             value = _amount_value_for_cell(cell)
             if not value:
                 continue  # a total cell with no amount (empty or label-only) is not a critical field
-            role = "subtotal" if _SUBTOTAL_RE.search(cell.text_norm) else "grand_total"
+            labels = [
+                c.text_norm.strip() for c in table.cells
+                if c.row == cell.row and c.is_span_origin and c.col != cell.col
+                and c.text_norm.strip() and not c.is_numeric
+            ]
+            label = min(labels, key=lambda t: (len(t.split()), len(t))) if labels else ""
+            role = "subtotal" if _SUBTOTAL_RE.search(cell.text_norm + " " + label) else "grand_total"
             multiplicity = amount_counts.get(value, 1) if value else 1
-            fields.append(
-                CriticalField(
-                    role=role,
-                    value=value,
-                    cell_ref=CellRef(cell.table_index, cell.row, cell.col),
-                    expected_multiplicity=max(1, multiplicity),
-                )
-            )
+            fields.append(CriticalField(role=role, value=value, cell_ref=CellRef(cell.table_index, cell.row, cell.col),
+                                        expected_multiplicity=max(1, multiplicity), label=" ".join(label.split()[:12])))
+            seen_values.add(value)
+
+    for pair in document.label_value_pairs:
+        if not _TOTAL_KEYWORD_RE.search(pair.label):
+            continue
+        amounts = [t for t in _extract_pair_tokens(pair.value) if t.type == "amount" and t.canonical]
+        if len(amounts) != 1 or amounts[0].canonical in seen_values:
+            continue
+        value = amounts[0].canonical
+        role = "subtotal" if _SUBTOTAL_RE.search(pair.label) else "grand_total"
+        fields.append(CriticalField(role=role, value=value, cell_ref=None,
+                                    expected_multiplicity=max(1, amount_counts.get(value, 1)),
+                                    label=" ".join(pair.label.split()[:12])))
+        seen_values.add(value)
     return fields
+
+
+def _extract_pair_tokens(text: str):
+    from ocrgrade.fintoken import extract_tokens
+
+    return extract_tokens(text)
 
 
 def _amount_value_for_cell(cell) -> str:
@@ -379,6 +404,7 @@ def _from_dict(data: dict[str, Any]) -> Sidecar:
             value=cf["value"],
             cell_ref=CellRef(**cf["cell_ref"]) if cf.get("cell_ref") else None,
             expected_multiplicity=cf.get("expected_multiplicity", 1),
+            label=cf.get("label", ""),
         )
         for cf in data.get("critical_fields", [])
     ]

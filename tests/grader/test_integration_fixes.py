@@ -165,3 +165,72 @@ def test_aifa_reader_honours_declared_markdown_form_when_text_looks_plain(tmp_pa
     records, meta = inputs._load_aifa_results(f)
     assert records[0].hint == "markdown"
 
+
+# --- round 5: A1 on real Qwen/Gemma output --------------------------------------------
+
+
+def test_last_row_line_item_is_not_promoted_to_total():
+    html = """<table>
+<tr><td>47366</td><td>PREMIUM PORRIDGE OATS</td><td>1.19 E</td></tr>
+<tr><td>84693</td><td>#DRONE CAMERA</td><td>59.99 D</td></tr></table>"""
+    gt, _, side = _docs(html, html)
+    assert not [c for t in gt.tables for c in t.cells if c.role == "total_value"]
+    html2 = "<table><tr><td>Item</td><td>1.19</td></tr><tr><td>Total</td><td>1.19</td></tr></table>"
+    gt2, _, _ = _docs(html2, html2)
+    assert [c.text_norm for t in gt2.tables for c in t.cells if c.role == "total_value" and c.is_numeric] == ["1.19"]
+
+
+def test_row_label_prefers_short_label_over_paragraph_and_total_synonyms_match():
+    from ocrgrade.ir import CellRef, CriticalField
+
+    gt_html = ("<table><tr><td>Did you know? Register or login today where you can check your balance "
+               "and view your bill and make secure payments</td><td>Total Bill amount to be taken from your bank a/c.</td>"
+               "<td class=\"final-val\">133.93</td></tr></table>")
+    hyp_html = "<table><tr><td>TOTAL DUE</td><td>133.93</td></tr></table>"
+    gt, hyp, side = _docs(gt_html, hyp_html)
+    assert assertions._row_label(gt.tables[0], 0, 2) == "Total Bill amount to be taken from your bank a/c."
+    assert assertions._label_matches("Closing Balance", "Opening Balance") is False
+    assert assertions._label_matches("Total", "Subtotal") is False
+    assert assertions._label_matches("Net pay", "Gross pay") is False
+    assert assertions._label_matches("Total Bill amount to be taken from your bank a/c.", "TOTAL DUE") is True
+    side.critical_fields = [CriticalField("grand_total", "133.93", CellRef(0, 0, 2))]
+    assert {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A1"].passed
+
+
+def test_colspan_title_row_is_not_a_column_header_and_out_of_table_total_is_accepted():
+    from ocrgrade.ir import CellRef, CriticalField
+
+    gt_html = ("<table><tr><th colspan=\"2\">Explanation Panels</th></tr>"
+               "<tr><td>Combined Total</td><td class=\"final-val\">3,637.00</td></tr></table>")
+    hyp_html = "<p>Explanation Panels</p><p>Combined Total: 3,637.00</p>"
+    gt, hyp, side = _docs(gt_html, hyp_html)
+    assert assertions._col_header(gt.tables[0], 1) == ""
+    side.critical_fields = [CriticalField("grand_total", "3637.00", CellRef(0, 1, 1))]
+    assert {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A1"].passed
+
+
+def test_out_of_table_total_becomes_a_critical_field_and_a1_checks_it():
+    gt_html = "<h2>SALE</h2><p>Goods: 66.71</p><p>Total: EUR66.71</p><table><tr><td>6 Items</td><td>66.71</td></tr></table>"
+    gt, _, _ = _docs(gt_html, gt_html)
+    side = sc.derive("c", gt_html, {})
+    fields = [(c.role, c.value, c.cell_ref, c.label) for c in side.critical_fields]
+    assert ("grand_total", "66.71", None, "Total") in fields, fields
+    ok_hyp = "<p>Total: EUR 66.71</p><p>6 Items 66.71</p>"
+    bad_hyp = "<p>Total: EUR 67.71</p><p>6 Items 66.71</p>"
+    for html, expect in ((ok_hyp, True), (bad_hyp, False)):
+        _, hyp, _ = _docs(gt_html, html)
+        assert {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A1"].passed is expect, html
+
+
+def test_subtotal_spellings_and_prose_totals():
+    assert assertions._label_matches("Sub-total cardholder balances", "Subtotal cardholder balances") is True
+    assert assertions._label_matches("Subtotal", "Total") is False
+    gt_html = "<table><tr><td>Total-EFT CHF</td><td class=\"final-val\">362.00</td></tr></table>"
+    hyp_html = "<p>Payment</p><p>Total-EFT CHF 362.00</p>"
+    gt, hyp, side = _docs(gt_html, hyp_html)
+    side = sc.derive("c", gt_html, {})
+    assert side.critical_fields and side.critical_fields[0].label == "Total-EFT CHF"
+    assert {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A1"].passed
+    _, hyp_bad, _ = _docs(gt_html, "<p>Payment</p><p>Total-EFT CHF 326.00</p>")
+    assert not {a.id: a for a in assertions.run_assertions(gt, hyp_bad, side)}["A1"].passed
+

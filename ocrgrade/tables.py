@@ -15,6 +15,8 @@ canonicalize.py imports them back from here.
 """
 from __future__ import annotations
 
+from ocrgrade.roles import _TOTAL_KEYWORD_RE
+
 import unicodedata
 from typing import Any
 
@@ -246,6 +248,11 @@ def _apply_last_numeric_row_fallback(
 
     row_cells = [grid.get((last_nonempty_row, c)) for c in range(n_cols)]
     if not any(c is not None and c.is_numeric for c in row_cells):
+        return
+    # A last row is only a totals row when it says so: receipts end in a line item or a
+    # card-slip line, and promoting those produced spurious critical fields on real data.
+    row_text = " ".join(c.text_norm for c in row_cells if c is not None and not c.is_numeric)
+    if not _TOTAL_KEYWORD_RE.search(row_text):
         return
 
     for c in range(n_cols):

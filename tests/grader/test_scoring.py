@@ -237,7 +237,7 @@ def test_reject_ceiling_holds_even_when_q_is_very_high():
     # table cell (a deliberately simplified fixture: this isolates "one
     # structural cell misplacement" from "content extraction elsewhere",
     # which is exactly the scenario the acceptance check is about).
-    hyp = make_doc(tables=[hyp_table], body_text_norm=body, fin_tokens=fin_tokens)
+    hyp = make_doc(tables=[hyp_table], body_text_norm=body.replace("Total 100.00", "Total 999.99"), fin_tokens=fin_tokens)
     sidecar = make_sidecar(
         critical_fields=[CriticalField(role="grand_total", value="100.00", cell_ref=CellRef(0, 2, 1))]
     )

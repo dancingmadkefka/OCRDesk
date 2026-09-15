@@ -94,25 +94,29 @@ def _row_origin_cells(table: Table, row: int) -> list[Cell]:
 
 
 def _row_label(table: Table, row: int, exclude_col: int | None) -> str:
-    """Label text of a table row: its non-numeric cells (excluding the value cell). When the row
-    carries no label, walk up to three rows for the nearest labelled row (statement blocks)."""
+    """Label of a table row: its shortest non-numeric cell (so a marketing paragraph sharing the
+    row never becomes the label), truncated to twelve words. When the row carries no label,
+    walk up to three rows for the nearest labelled row (statement blocks)."""
     for r in range(row, max(-1, row - 4), -1):
-        parts = [
-            c.text_norm for c in _row_origin_cells(table, r)
+        candidates = [
+            c.text_norm.strip() for c in _row_origin_cells(table, r)
             if c.text_norm.strip() and not c.is_numeric and not (r == row and c.col == exclude_col)
         ]
-        if parts:
-            return " ".join(parts)
+        if candidates:
+            best = min(candidates, key=lambda t: (len(t.split()), len(t)))
+            return " ".join(best.split()[:12])
     return ""
 
 
 def _col_header(table: Table, col: int) -> str:
-    """Text of the header cell above a column when the table's first row is a header row."""
-    first = _row_origin_cells(table, 0) or [c for c in table.cells if c.row == 0]
-    if not first or not all((c.is_header or not c.is_numeric) for c in first if c.text_norm.strip()):
+    """Text of the per-column header above `col`, or '' when the table has no real header row
+    (a first row that is a single spanning title, or that holds numbers, does not count)."""
+    first = [c for c in table.cells if c.row == 0]
+    origins = [c for c in first if c.is_span_origin and c.text_norm.strip()]
+    if len(origins) < 2 or any(c.is_numeric for c in origins) or any(c.colspan > 1 for c in origins):
         return ""
-    for c in table.cells:
-        if c.row == 0 and c.col == col:
+    for c in first:
+        if c.col == col and c.is_span_origin:
             return c.text_norm
     return ""
 
@@ -121,21 +125,45 @@ _LABEL_TOKEN_RE = re.compile(r"[0-9a-z]+")
 
 
 def _label_tokens(text: str) -> list[str]:
-    return _LABEL_TOKEN_RE.findall(text.casefold())
+    toks = _LABEL_TOKEN_RE.findall(text.casefold())
+    out: list[str] = []
+    i = 0
+    while i < len(toks):
+        if toks[i] == "sub" and i + 1 < len(toks) and toks[i + 1] == "total":
+            out.append("subtotal")  # 'Sub-total' and 'sub total' mean 'Subtotal'
+            i += 2
+            continue
+        out.append(toks[i])
+        i += 1
+    return out
+
+
+_SENSE_QUALIFIERS = frozenset({
+    "opening", "closing", "previous", "new", "gross", "net", "sub", "subtotal", "vat", "tax",
+    "minimum", "min", "interest", "credit", "debit", "brought", "carried", "forward", "discount",
+})
 
 
 def _label_matches(gt_label: str, hyp_text: str) -> bool:
-    """Every word of the GT label must appear as a whole word in the hypothesis text.
+    """Do two row labels mean the same thing?
 
     Word-level on purpose: 'Closing Balance' vs 'Opening Balance' and 'Total' vs 'Subtotal'
-    are different financial meanings that character-level fuzziness would blur. A word of
-    five or more characters tolerates a small OCR slip (ratio >= 0.85, e.g. 'tota1')."""
+    are different financial meanings that character-level fuzziness would blur, so the
+    sense-changing qualifiers present on either side must agree exactly. Beyond that, every
+    GT word must appear in the hypothesis (a word of five or more characters tolerates a small
+    OCR slip, ratio >= 0.85); labels longer than four words match on 60% of their words, and two
+    labels that both name a total match each other ('Total due' vs 'Total bill amount to be
+    taken from your bank a/c')."""
     g_toks = _label_tokens(gt_label)
     if not g_toks:
         return True
     h_toks = _label_tokens(hyp_text)
     if not h_toks:
         return False
+    if (_SENSE_QUALIFIERS & set(g_toks)) != (_SENSE_QUALIFIERS & set(h_toks)):
+        return False
+    if _TOTAL_KEYWORD_RE.search(gt_label) and _TOTAL_KEYWORD_RE.search(hyp_text):
+        return True
 
     def word_ok(g: str) -> bool:
         if g in h_toks:
@@ -144,7 +172,10 @@ def _label_matches(gt_label: str, hyp_text: str) -> bool:
             return any(len(h) >= 5 and difflib.SequenceMatcher(None, g, h).ratio() >= 0.85 for h in h_toks)
         return False
 
-    return all(word_ok(g) for g in g_toks)
+    hits = sum(1 for g in g_toks if word_ok(g))
+    if len(g_toks) > 4:
+        return hits >= 0.6 * len(g_toks)
+    return hits == len(g_toks)
 
 
 def _value_in_labelled_row(value: str, gt_label: str, gt_col_header: str, hyp: Document) -> tuple[bool, str]:
@@ -172,34 +203,76 @@ def _value_in_labelled_row(value: str, gt_label: str, gt_col_header: str, hyp: D
             return True, ""
     return False, f"value present only in rows labelled {seen_labels[:3]}" if seen_labels else "value not found in any hyp table row"
 
+def _value_near_label_in_text(value: str, gt_label: str, body_text_norm: str) -> bool:
+    """Last resort for totals that a model kept as prose: the first amount that follows an
+    occurrence of the label (within 80 characters) has the same cents as the value."""
+    from ocrgrade.fintoken import extract_tokens
+
+    body = body_text_norm.casefold()
+    g_toks = _label_tokens(gt_label)
+    if not g_toks or not body:
+        return False
+    cents = _cents_of(value)
+    if cents is None:
+        return False
+    first = g_toks[0]
+    start = 0
+    while True:
+        pos = body.find(first, start)
+        if pos < 0:
+            return False
+        window_label = body[pos: pos + 120]
+        if _label_matches(gt_label, window_label):
+            label_end = pos + len(" ".join(g_toks))
+            following = body_text_norm[label_end: label_end + 80]
+            amounts = [t for t in extract_tokens(following) if t.type == "amount" and t.cents is not None]
+            if amounts:
+                return amounts[0].cents == cents
+        start = pos + 1
+
+
 
 def _check_a1(gt: Document, hyp: Document, sidecar: Sidecar) -> AssertionResult:
-    """Critical values must sit in a hypothesis row whose label matches the GT row (and under a
-    matching column header when both tables have one). Exact grid coordinates are accepted as a
-    fast path; they are not required, because models split and merge tables freely."""
-    fields_with_ref = [cf for cf in sidecar.critical_fields if cf.cell_ref is not None]
-    if not fields_with_ref:
-        return AssertionResult("A1", True, True, "no critical fields with cell_ref to check")
+    """Critical values must sit in a hypothesis row (or label-value pair) whose label matches the
+    GT label in meaning, and under a matching column header when both tables have one. Exact
+    grid coordinates are accepted as a fast path; they are not required, because models split
+    and merge tables freely. Fields without a cell_ref come from totals outside tables."""
+    fields = list(sidecar.critical_fields)
+    if not fields:
+        return AssertionResult("A1", True, True, "no critical fields to check")
 
     lookup = _hyp_cell_lookup(hyp)
     failures: list[str] = []
-    for cf in fields_with_ref:
+    for cf in fields:
         ref = cf.cell_ref
-        assert ref is not None
-        key = (ref.table_index, ref.row, ref.col)
-        hyp_cell = lookup.get(key)
-        if hyp_cell is not None and _value_in_cell(cf.value, hyp_cell):
-            continue
-        gt_label, gt_header = "", ""
-        if ref.table_index < len(gt.tables):
-            gt_table = gt.tables[ref.table_index]
-            gt_label = _row_label(gt_table, ref.row, ref.col)
-            gt_header = _col_header(gt_table, ref.col)
+        gt_label, gt_header = cf.label, ""
+        if ref is not None:
+            key = (ref.table_index, ref.row, ref.col)
+            hyp_cell = lookup.get(key)
+            if hyp_cell is not None and _value_in_cell(cf.value, hyp_cell):
+                continue
+            if ref.table_index < len(gt.tables):
+                gt_table = gt.tables[ref.table_index]
+                gt_label = gt_label or _row_label(gt_table, ref.row, ref.col)
+                gt_header = _col_header(gt_table, ref.col)
+        if len(_label_tokens(gt_label)) > 8:
+            # a paragraph is not a usable label: any total-ish row or pair in the hypothesis counts
+            gt_label = "total" if _TOTAL_KEYWORD_RE.search(gt_label) else ""
         found, note = _value_in_labelled_row(cf.value, gt_label, gt_header, hyp)
+        if not found and gt_label:
+            # the value may sit beside its label outside any table (a 'Total: 66.71' line)
+            cents = _cents_of(cf.value)
+            for pair in hyp.label_value_pairs:
+                if _label_matches(gt_label, pair.label) and (
+                    _squash(cf.value) in _squash(pair.value)
+                    or (cents is not None and cents == _cents_of(pair.value))
+                ):
+                    found = True
+                    break
+        if not found and gt_label:
+            found = _value_near_label_in_text(cf.value, gt_label, hyp.body_text_norm)
         if not found:
-            failures.append(
-                f"critical field {cf.role}={cf.value!r} (GT row label {gt_label!r}): {note}"
-            )
+            failures.append(f"critical field {cf.role}={cf.value!r} (GT label {gt_label!r}): {note}")
     passed = not failures
     detail = "all critical fields aligned" if passed else "; ".join(failures)
     return AssertionResult("A1", True, passed, detail)
