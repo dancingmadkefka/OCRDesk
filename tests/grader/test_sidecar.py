@@ -409,22 +409,12 @@ def test_write_review_csv_columns_and_row_content(tmp_path, ir_factory):
     sc2 = ir_factory.sidecar("case-2")
     path = tmp_path / "annotations_review.csv"
 
-    sidecar.write_review_csv([sc1, sc2], path)
+    sidecar.write_review_csv([sc1, sc2], path, {"case-1": "doc-1"})
 
     rows = list(csv.reader(io.StringIO(path.read_text(encoding="utf-8"))))
-    assert rows[0] == [
-        "case_id",
-        "category",
-        "category_secondary",
-        "locale",
-        "currency",
-        "decimal_sep",
-        "vat_letter_scheme",
-        "n_critical_fields",
-        "n_required_sections",
-        "n_label_value_pairs",
-        "confirmed",
-        "notes",
-    ]
-    assert rows[1] == ["case-1", "invoice", "bill", "OTHER", "EUR", ".", "False", "1", "2", "1", "True", "reviewed"]
-    assert rows[2] == ["case-2", "other", "", "OTHER", "", ".", "False", "0", "0", "0", "False", ""]
+    assert rows[0] == sidecar.REVIEW_COLUMNS
+    cf = sc1.critical_fields[0]
+    critical = f"{cf.role} {cf.value}" + (f" '{cf.label}'" if cf.label else "")
+    assert rows[1] == ["case-1", "doc-1", "invoice", "bill", "OTHER", "EUR", ".", "False", critical, "A | B",
+                       "1", "2", "1", "True", "reviewed"]
+    assert rows[2] == ["case-2", "", "other", "", "OTHER", "", ".", "False", "", "", "0", "0", "0", "False", ""]
