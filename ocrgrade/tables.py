@@ -113,7 +113,9 @@ def _cell_classes(cell_el: Tag) -> list[str]:
 
 
 def _iter_dom_rows(table_el: Tag) -> list[Tag]:
-    return table_el.find_all("tr", recursive=True)
+    """Rows of this table only: a table nested inside a layout cell is discovered and graded
+    on its own, so its rows must not also become rows of the parent grid."""
+    return [tr for tr in table_el.find_all("tr", recursive=True) if tr.find_parent("table") is table_el]
 
 
 def build_table(
@@ -171,7 +173,9 @@ def build_table(
             class_matched[(row_idx, col_cursor)] = any(
                 cls in role_map.class_to_role for cls in classes
             )
-            raw = extract_block_text(cell_el)
+            # A cell that wraps a nested table owns only the text outside it; the nested
+            # table is parsed as its own Table, so its amounts must not be counted here too.
+            raw = extract_block_text(cell_el, extra_skip=frozenset({"table"}))
             norm = normalize_text(raw)
             is_header = tag == "th" or in_thead_first_row
             role = resolve_role(

@@ -52,7 +52,15 @@ sniffed from the content; when the sniff says plain text but the case (or run)
 declares `output_form: markdown|html`, the declared form wins, because the harness
 knows the prompt's contract. A case whose
 `status` is not `"ok"` is graded as a harness failure (CATASTROPHIC tier, all
-metrics null) rather than an empty transcription error. Two cheap catastrophic
+metrics null) rather than an empty transcription error. Amounts keep their sign (`-12.34`,
+`(12.34)`), so a debit flipped to a credit is a financial-token error, and a total the GT
+prints twice must occur at least twice in the hypothesis; both sides are counted at score
+time with the same counter, and a cell's text stops at any table nested inside it, so a
+value inside a nested table is counted once. The sidecar's `expected_multiplicity` is written
+for the reviewer and never read by `score`. `annotate` stamps every sidecar with a fingerprint
+of the grader build; `score` warns and records `stale_sidecars` in `summary.json` when a
+sidecar was annotated by a different build (re-run `annotate`; confirmed sidecars are kept). A TEDS timeout or a table beyond
+the cell cap makes the case CATASTROPHIC rather than a silent zero. Two cheap catastrophic
 detectors also run on every case: runaway or near-empty output (hypothesis text
 longer than 5x or shorter than 0.1x the GT text) and CER above 0.8; both give
 `CATASTROPHIC` with the reason in `errors`, so a model that loops never earns a

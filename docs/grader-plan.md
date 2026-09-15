@@ -114,7 +114,7 @@ class CaseResult: ...  # section 7; produced by scoring.py, consumed by report.p
 | `vat_letter_scheme` | bool | `false` | true if the VAT-letter regex matches at least one amount |
 | `has_tables` | bool | from manifest | manifest `has_tables` |
 | `required_sections` | list[str] | `[]` | normalized text of every `role == section_header` cell/element |
-| `critical_fields` | list[CriticalField] | `[]` | every `role == total_value` cell → `CriticalField(role="grand_total"/"subtotal", value, cell_ref, expected_multiplicity=count_in_gt(value))` |
+| `critical_fields` | list[CriticalField] | `[]` | every `role == total_value` cell → `CriticalField(role="grand_total"/"subtotal", value, cell_ref, expected_multiplicity=count_in_gt(value))`; the multiplicity is informational, A1 recounts both sides at score time |
 | `label_value_pairs` | list[{label, value}] | `[]` | table-adjacent pairs + sibling-heuristic pairs (section 3) |
 | `line_item_schema` | list[str] | `[]` | column identities from the `col-*` class family or header-row text, per table with 3+ data rows |
 | `confirmed` | bool | `false` | always `false` on generation |

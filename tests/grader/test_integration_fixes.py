@@ -215,8 +215,8 @@ def test_out_of_table_total_becomes_a_critical_field_and_a1_checks_it():
     side = sc.derive("c", gt_html, {})
     fields = [(c.role, c.value, c.cell_ref, c.label) for c in side.critical_fields]
     assert ("grand_total", "66.71", None, "Total") in fields, fields
-    ok_hyp = "<p>Total: EUR 66.71</p><p>6 Items 66.71</p>"
-    bad_hyp = "<p>Total: EUR 67.71</p><p>6 Items 66.71</p>"
+    ok_hyp = "<p>Goods: 66.71</p><p>Total: EUR 66.71</p><p>6 Items 66.71</p>"  # GT prints it three times
+    bad_hyp = "<p>Goods: 66.71</p><p>Total: EUR 67.71</p><p>6 Items 66.71</p>"
     for html, expect in ((ok_hyp, True), (bad_hyp, False)):
         _, hyp, _ = _docs(gt_html, html)
         assert {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A1"].passed is expect, html
@@ -234,3 +234,174 @@ def test_subtotal_spellings_and_prose_totals():
     _, hyp_bad, _ = _docs(gt_html, "<p>Payment</p><p>Total-EFT CHF 326.00</p>")
     assert not {a.id: a for a in assertions.run_assertions(gt, hyp_bad, side)}["A1"].passed
 
+
+# --- Codex review of PR #1 ------------------------------------------------------------
+
+
+def test_negative_and_parenthesised_amounts_keep_their_sign():
+    from ocrgrade import fintoken
+
+    toks = {t.raw: t for t in fintoken.extract_tokens("Debit -12.34 Credit 12.34 Fee (5.00) Total-EFT CHF 362.00 range 10-20.00")}
+    assert toks["-12.34"].cents == -1234 and toks["-12.34"].canonical == "-12.34"
+    assert toks["12.34"].cents == 1234
+    assert toks["(5.00)"].cents == -500
+    assert [t.cents for t in toks.values() if t.raw.endswith("362.00")] == [36200]  # 'Total-EFT' is a word, not a sign
+    assert toks["20.00"].cents == 2000  # '10-20.00' is a range
+    gt_html = "<table><tr><td>Balance</td><td class=\"final-val\">-12.34</td></tr></table>"
+    gt, hyp_ok, side = _docs(gt_html, gt_html)
+    side = sc.derive("c", gt_html, {})
+    assert side.critical_fields[0].value == "-12.34"
+    _, hyp_flipped, _ = _docs(gt_html, gt_html.replace("-12.34", "12.34"))
+    assert {a.id: a for a in assertions.run_assertions(gt, hyp_ok, side)}["A1"].passed
+    assert not {a.id: a for a in assertions.run_assertions(gt, hyp_flipped, side)}["A1"].passed
+
+
+def test_repeated_total_must_keep_its_multiplicity():
+    gt_html = ("<table><tr><td>Total</td><td class=\"final-val\">60.00</td></tr></table>"
+               "<p>Customer copy</p><table><tr><td>Total</td><td class=\"final-val\">60.00</td></tr></table>")
+    gt, hyp_full, _ = _docs(gt_html, gt_html)
+    side = sc.derive("c", gt_html, {})
+    cf = [c for c in side.critical_fields if c.value == "60.00"]
+    assert cf and cf[0].expected_multiplicity == 2
+    assert {a.id: a for a in assertions.run_assertions(gt, hyp_full, side)}["A1"].passed
+    _, hyp_one, _ = _docs(gt_html, "<table><tr><td>Total</td><td>60.00</td></tr></table><p>Customer copy</p>")
+    result = {a.id: a for a in assertions.run_assertions(gt, hyp_one, side)}["A1"]
+    assert not result.passed and "appears 1x" in result.detail
+
+
+def test_nested_table_rows_stay_out_of_the_parent_grid():
+    html = ("<table><tr><td>Outer A</td><td><table><tr><td>Inner 1</td><td>1.00</td></tr>"
+            "<tr><td>Inner 2</td><td>2.00</td></tr></table></td></tr><tr><td>Total</td><td>3.00</td></tr></table>")
+    gt, _, _ = _docs(html, html)
+    outer = gt.tables[0]
+    assert outer.n_rows == 2, outer.n_rows
+    assert len(gt.tables) == 2 and gt.tables[1].n_rows == 2
+
+
+def test_aifa_run_level_output_form_is_carried(tmp_path: Path):
+    import json
+    from ocrgrade import inputs
+
+    payload = {"model": "m", "output_form": "markdown",
+               "cases": [{"case_id": "case-001", "status": "ok", "hypothesis_html": "<pre>x</pre>", "hypothesis_raw": "Total 12.50", "runtime_seconds": 1.0}]}
+    f = tmp_path / "html_vlm_y.json"
+    f.write_text(json.dumps(payload), encoding="utf-8")
+    records, meta = inputs._load_aifa_results(f)
+    assert meta["output_form"] == "markdown" and records[0].hint == "markdown"
+
+
+def test_teds_timeout_makes_the_case_catastrophic(monkeypatch):
+    from ocrgrade import metrics_structure, scoring, teds_adapter
+
+    gt_html = "<table><tr><td>Total</td><td class=\"final-val\">1.00</td></tr></table>"
+    gt, hyp, side = _docs(gt_html, gt_html)
+    monkeypatch.setattr(metrics_structure.teds_adapter, "teds_scores",
+                        lambda a, b: teds_adapter.TedsResult(teds=0.0, teds_struct=0.0, per_table=[0.0], n_pairs=1, timed_out=True))
+    r = scoring.score_document(gt, hyp, side)
+    assert r.tier == "CATASTROPHIC" and r.display_score == 0.0 and any("TEDS" in e for e in r.errors)
+
+
+
+NESTED_GT = ("<table><tr><td>Summary</td><td><table><tr><td>Net Pay</td><td>1234.56</td></tr></table></td></tr>"
+             "<tr><td>Payable by EFT</td><td>1234.56</td></tr></table>")
+
+
+def test_nested_table_content_belongs_to_the_nested_table_only():
+    gt, _, _ = _docs(NESTED_GT, NESTED_GT)
+    wrapper = next(c for c in gt.tables[0].cells if c.row == 0 and c.col == 1)
+    assert wrapper.text_norm.strip() == ""  # the outer cell owns no text of its own
+    assert sum(1 for t in gt.fin_tokens if t.type == "amount" and t.cents == 123456) == 2  # printed twice, counted twice
+
+
+def test_flattened_nested_tables_keep_a1_when_every_printing_survives():
+    side = sc.derive("t", NESTED_GT)
+    flat = ("<table><tr><td>Net Pay</td><td>1234.56</td></tr>"
+            "<tr><td>Payable by EFT</td><td>1234.56</td></tr></table>")
+    gt, hyp, _ = _docs(NESTED_GT, flat)
+    a1 = {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A1"]
+    assert a1.passed, a1.detail
+    gt, hyp, _ = _docs(NESTED_GT, "<table><tr><td>Net Pay</td><td>1234.56</td></tr></table>")
+    a1 = {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A1"]
+    assert not a1.passed and "appears 1x in hyp, GT has it 2x" in a1.detail
+
+
+def test_a1_multiplicity_is_counted_live_not_read_from_the_sidecar():
+    from dataclasses import replace
+
+    side = sc.derive("t", NESTED_GT)
+    side.critical_fields = [replace(cf, expected_multiplicity=7) for cf in side.critical_fields]  # an older tokenizer's count
+    gt, hyp, _ = _docs(NESTED_GT, NESTED_GT)
+    a1 = {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A1"]
+    assert a1.passed, a1.detail
+
+
+def test_annotate_stamps_the_grader_build_and_score_reports_stale_sidecars(tmp_path: Path, capsys):
+    import json
+    from ocrgrade import cli
+
+    corpus = tmp_path / "corpus"
+    case = corpus / "case-001"
+    case.mkdir(parents=True)
+    (case / "doc.html").write_text(NESTED_GT, encoding="utf-8")
+    (case / "doc.jpg").write_bytes(b"\xff\xd8\xff")
+    assert cli.main(["annotate", "--corpus", str(corpus)]) == 0
+    meta_path = case / "doc.meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert meta["annotator_fingerprint"] == sc.annotator_fingerprint() and len(meta["annotator_fingerprint"]) == 12
+
+    hyp_dir = tmp_path / "hyp"
+    hyp_dir.mkdir()
+    (hyp_dir / "case-001.html").write_text(NESTED_GT, encoding="utf-8")
+    out = tmp_path / "out"
+    assert cli.main(["score", "--corpus", str(corpus), "--hyp-dir", str(hyp_dir), "--out-dir", str(out), "--run-id", "fresh"]) == 0
+    assert json.loads((out / "fresh" / "summary.json").read_text(encoding="utf-8"))["stale_sidecars"] == 0
+
+    meta["annotator_fingerprint"] = "0ld0ld0ld0ld"
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    capsys.readouterr()
+    assert cli.main(["score", "--corpus", str(corpus), "--hyp-dir", str(hyp_dir), "--out-dir", str(out), "--run-id", "stale"]) == 0
+    assert json.loads((out / "stale" / "summary.json").read_text(encoding="utf-8"))["stale_sidecars"] == 1
+    assert "annotated by a different grader build (case-001)" in capsys.readouterr().err
+
+
+def test_prose_totals_are_found_after_any_occurrence_of_their_label():
+    gt_html = ("<table><tr><td>Total Payments</td><td>1810.50</td></tr><tr><td>Net Pay</td><td>1650.40</td></tr></table>"
+               "<table><tr><td>Gross Taxable</td><td>3400.00</td></tr><tr><td>Net Pay</td><td>3210.75</td></tr></table>")
+    side = sc.derive("t", gt_html)
+    assert {(cf.label, cf.value) for cf in side.critical_fields} >= {("Net Pay", "1650.40"), ("Net Pay", "3210.75")}
+    hyp_html = ("<p>Total Payments <span>1810.50</span></p><p>Net Pay <span>1650.40</span></p>"
+                "<p>Summary To-date</p><p>Gross Taxable <span>3400.00</span></p><p>Net Pay <span>3210.75</span></p>")
+    gt, hyp, _ = _docs(gt_html, hyp_html)
+    a1 = {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A1"]
+    assert a1.passed, a1.detail
+    gt, hyp, _ = _docs(gt_html, hyp_html.replace("3210.75", "3120.75"))
+    a1 = {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A1"]
+    assert not a1.passed and "3210.75" in a1.detail
+
+
+def test_vat_letter_after_non_breaking_spaces_is_still_attached():
+    from ocrgrade import fintoken
+
+    toks = {t.type: t for t in fintoken.extract_tokens("219.90\u00a0\u00a0H")}
+    assert toks["vat_letter"].attached is True and toks["vat_letter"].vat_letter == "H"
+    toks = {t.type: t for t in fintoken.extract_tokens("219.90\nH")}
+    assert toks["vat_letter"].attached is False
+
+
+def test_a2_accepts_gt_totals_kept_as_prose_or_in_a_merged_table():
+    rm = roles.load_role_map(None)
+    total_cls = next(c for c, r in rm.class_to_role.items() if r == "total_value")
+    gt_html = (f"<table><tr><td>PAYE</td><td>90.10</td></tr><tr><td>Net Pay</td><td class='{total_cls}'>1650.40</td></tr></table>"
+               "<table><tr><td>Gross Taxable</td><td>3400.00</td></tr></table>")
+    gt, _, side = _docs(gt_html, gt_html)
+    assert any(c.role == "total_value" for t in gt.tables for c in t.cells), "fixture needs a class-marked total"
+    prose = "<p>PAYE <span>90.10</span></p><p>Net Pay <span>1650.40</span></p><p>Gross Taxable <span>3400.00</span></p>"
+    merged = ("<table><tr><td>PAYE</td><td>90.10</td></tr><tr><td>Net Pay</td><td>1650.40</td></tr>"
+              "<tr><td>Gross Taxable</td><td>3400.00</td></tr></table>")
+    for hyp_html in (prose, merged):
+        _, hyp, _ = _docs(gt_html, hyp_html)
+        a2 = {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A2"]
+        assert a2.passed, a2.detail
+    _, hyp, _ = _docs(gt_html, merged.replace("1650.40", "1605.40"))
+    a2 = {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A2"]
+    assert not a2.passed and "1650.40" in a2.detail

@@ -71,6 +71,18 @@ def score_document(
 
     assert content is not None
     structure = structure_metrics(gt, hyp)
+    if structure.get("teds_timed_out"):
+        # design risk L1: a table beyond the cell cap or the TEDS timeout is CATASTROPHIC, never
+        # silently graded as a zero-structure document
+        return CaseResult(
+            case_id=sidecar.case_id, status=status, input_form=input_form, tier="CATASTROPHIC",
+            provisional=not sidecar.confirmed, parse_ok=hyp.parse_ok, truncated=hyp.truncated,
+            table_count_gt=table_count_gt, table_count_hyp=table_count_hyp,
+            structure_na=structure["structure_na"], reading_order_na=content.get("reading_order_na", False),
+            metrics={**content, **structure}, assertions=[], archival_safe=False, display_score=0.0,
+            runtime_seconds=runtime_seconds, errors=["TEDS timed out or a table exceeded the cell cap"],
+            category=case_category,
+        )
     assertion_results = run_assertions(gt, hyp, sidecar)
 
     critical_failed = [a for a in assertion_results if a.critical and not a.passed]
@@ -239,4 +251,5 @@ def rollup(results: list[CaseResult], *, run_meta: dict) -> dict:
         "headline_display_score": headline_display_score,
         "micro_display_score": micro_display_score,
         "config_hash": run_meta.get("config_hash", {}),
+        "stale_sidecars": run_meta.get("stale_sidecars", 0),
     }

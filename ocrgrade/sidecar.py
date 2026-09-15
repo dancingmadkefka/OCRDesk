@@ -13,6 +13,8 @@ contract for Scope C).
 from __future__ import annotations
 
 import csv
+import functools
+import hashlib
 import json
 import re
 from dataclasses import asdict
@@ -201,7 +203,20 @@ def derive(
         line_item_schema=line_item_schema,
         confirmed=False,
         notes="",
+        annotator_fingerprint=annotator_fingerprint(),
     )
+
+
+@functools.lru_cache(maxsize=1)
+def annotator_fingerprint() -> str:
+    """Short hash of the grader's own source (every .py and .yaml in the package). `annotate`
+    stamps it into each sidecar so `score` can tell when the derived fields predate the code."""
+    pkg = Path(__file__).resolve().parent
+    digest = hashlib.sha256()
+    for path in sorted(pkg.glob("*.py")) + sorted(pkg.glob("*.yaml")):
+        digest.update(path.name.encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
 
 
 def write_review_csv(sidecars: Iterable[Sidecar], path: Path) -> None:
@@ -424,4 +439,5 @@ def _from_dict(data: dict[str, Any]) -> Sidecar:
         line_item_schema=list(data.get("line_item_schema", [])),
         confirmed=data.get("confirmed", False),
         notes=data.get("notes", ""),
+        annotator_fingerprint=data.get("annotator_fingerprint", ""),
     )

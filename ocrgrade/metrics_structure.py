@@ -176,6 +176,7 @@ def structure_metrics(gt: Document, hyp: Document) -> dict:
         "heading_sequence_score": hs_score,
         "teds": teds_result.teds,
         "teds_struct": teds_result.teds_struct,
+        "teds_timed_out": teds_result.timed_out,
         "structure_na": structure_na,
         "structure_score": structure_score,
         "table_count_gt": table_count_gt,

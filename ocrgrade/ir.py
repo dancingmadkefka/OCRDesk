@@ -133,6 +133,7 @@ class Sidecar:
     line_item_schema: list[str]
     confirmed: bool = False
     notes: str = ""
+    annotator_fingerprint: str = ""  # grader build that derived the fields; "" = unknown
 
 
 @dataclass

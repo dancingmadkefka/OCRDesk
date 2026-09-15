@@ -90,6 +90,28 @@ def _parse_amount_to_cents(num_str: str) -> int:
     return int(int_part) * 100 + int(frac)
 
 
+def _canonical_cents(cents: int) -> str:
+    sign = "-" if cents < 0 else ""
+    whole, frac = divmod(abs(cents), 100)
+    return f"{sign}{whole}.{frac:02d}"
+
+
+def _apply_sign(text: str, start: int, end: int) -> tuple[int, int, bool]:
+    """Widen an amount match to include a leading minus or accounting parentheses.
+
+    A minus counts only when it is not glued to a preceding word or number ('10-20.00' is a
+    range, 'Total-EFT' is a word), so '-12.34', 'CHF -12.34' and ': -12.34' are negative and
+    '(12.34)' is negative. Returns the widened span and the sign."""
+    before = text[start - 1] if start > 0 else ""
+    before2 = text[start - 2] if start > 1 else ""
+    after = text[end] if end < len(text) else ""
+    if before and before in "-\u2212" and (start == 1 or before2 in " \t\n:(\u00a0"):
+        return start - 1, end, True
+    if before == "(" and after == ")":
+        return start - 1, end + 1, True
+    return start, end, False
+
+
 def _match_vat_letter_after(text: str, pos: int) -> tuple[int, int, str, bool] | None:
     """Look for a VAT-rate letter immediately following an amount at `pos`.
 
@@ -99,10 +121,11 @@ def _match_vat_letter_after(text: str, pos: int) -> tuple[int, int, str, bool] |
     ("59.99\\nD") — matching the three-way triad in the plan exactly.
     """
     window = text[pos : pos + 24]
-    same_line = re.match(rf"[ \t]*([{_VAT_LETTERS}])(?![A-Za-z0-9])", window)
+    # Non-breaking spaces (models emit `&nbsp;` between amount and letter) are still the same line.
+    same_line = re.match(rf"[ \t\u00a0]*([{_VAT_LETTERS}])(?![A-Za-z0-9])", window)
     if same_line:
         return pos + same_line.start(1), pos + same_line.end(1), same_line.group(1), True
-    blocked = re.match(rf"[ \t]*\n[ \t\n]*([{_VAT_LETTERS}])(?![A-Za-z0-9])", window)
+    blocked = re.match(rf"[ \t\u00a0]*\n[ \t\n\u00a0]*([{_VAT_LETTERS}])(?![A-Za-z0-9])", window)
     if blocked:
         return pos + blocked.start(1), pos + blocked.end(1), blocked.group(1), False
     return None
@@ -265,12 +288,15 @@ def extract_tokens(text: str, locale_hint: str | None = None) -> list[FinToken]:
         )))
 
     for m in _AMOUNT_CORE_RE.finditer(text):
-        if not claims.claim(*m.span()):
+        start, end, negative = _apply_sign(text, m.start(), m.end())
+        if not claims.claim(start, end):
             continue
         cents = _parse_amount_to_cents(m.group("num"))
+        if negative:
+            cents = -cents
         currency = _match_currency(m.group("pfx") or m.group("sfx"))
-        found.append((m.start(), FinToken(
-            type="amount", raw=m.group(0).strip(), canonical=f"{cents / 100:.2f}",
+        found.append((start, FinToken(
+            type="amount", raw=text[start:end].strip(), canonical=_canonical_cents(cents),
             cents=cents, currency=currency, vat_letter=None, attached=False, cell_ref=None,
         )))
         letter = _match_vat_letter_after(text, m.end())
@@ -284,13 +310,16 @@ def extract_tokens(text: str, locale_hint: str | None = None) -> list[FinToken]:
                 )))
 
     for m in _AMOUNT_CUR_INT_RE.finditer(text):
-        if not claims.claim(*m.span()):
+        start, end, negative = _apply_sign(text, m.start(), m.end())
+        if not claims.claim(start, end):
             continue
         num = m.group("num2") or m.group("num3")
         cents = _parse_amount_to_cents(num)
+        if negative:
+            cents = -cents
         currency = _match_currency(m.group("pfx2") or m.group("sfx2"))
-        found.append((m.start(), FinToken(
-            type="amount", raw=m.group(0).strip(), canonical=f"{cents / 100:.2f}",
+        found.append((start, FinToken(
+            type="amount", raw=text[start:end].strip(), canonical=_canonical_cents(cents),
             cents=cents, currency=currency, vat_letter=None, attached=False, cell_ref=None,
         )))
 

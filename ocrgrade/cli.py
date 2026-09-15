@@ -380,8 +380,22 @@ def _run_score_like(
         results.append(result)
         report.write_case_json(result, cases_out_dir / f"{result.case_id}.json")
 
+    current_fp = sidecar.annotator_fingerprint()
+    stale = [
+        cf.case_id for cf in case_files_list
+        if getattr(cf, "sidecar_path", None) is not None and cf.sidecar_path.is_file()
+        and sidecar.load(cf.sidecar_path).annotator_fingerprint != current_fp
+    ]
+    if stale:
+        shown = ", ".join(stale[:5]) + (", ..." if len(stale) > 5 else "")
+        print(
+            f"warning: {len(stale)} sidecar(s) were annotated by a different grader build ({shown}); "
+            "derived fields may be stale - re-run `ocrgrade annotate` (confirmed sidecars are kept)",
+            file=sys.stderr,
+        )
     run_meta_full = dict(run_meta)
     run_meta_full["run_id"] = resolved_run_id
+    run_meta_full["stale_sidecars"] = len(stale)
     summary = rollup(results, run_meta=run_meta_full)
     report.write_summary_json(summary, run_out_dir / "summary.json")
     report.write_leaderboard_csv([summary], run_out_dir / "leaderboard.csv")

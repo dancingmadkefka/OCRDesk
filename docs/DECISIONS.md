@@ -263,6 +263,38 @@ would have kept:
   `fixtures-check` is the CI gate; `shadow` against the real corpus is manual,
   local, and never runs in CI.
 
+- **A nested table's content belongs to the nested table.** A cell that wraps
+  a nested table owns only the text outside it. Before this, a total inside
+  a nested payslip summary was tokenised once per nesting level, so `annotate`
+  wrote `expected_multiplicity: 10` for a value printed four times and every
+  model failed A1 on it. (2026-09-15, found while re-grading after the Codex
+  review round.)
+- **Multiplicity is counted live, on both sides, with one counter.** A1
+  recounts a critical value in the GT at score time and requires at least as
+  many printings in the hypothesis. The sidecar's `expected_multiplicity` is
+  written for the reviewer's benefit and never read by `score`, so a sidecar
+  annotated by an older tokenizer cannot skew the gate.
+- **Sidecars carry the grader build that derived them.** `annotate` stamps
+  `annotator_fingerprint` (a hash of the package source); `score` warns and
+  records `stale_sidecars` in `summary.json` when the corpus was annotated by
+  a different build. The GT corpus was scored once against stale sidecars
+  before this guard existed and the numbers were wrong.
+
+- **A2 aligns a GT total the way A1 does.** A hypothesis "totals row" (total
+  keyword or last numeric row) is the fast path; failing that, the value must
+  sit in a hyp row whose label matches the GT row label, or beside that label
+  as a label-value line or prose. Models merge tables and keep payslip
+  summaries as paragraphs, and A1 already accepted those; A2 rejecting them
+  made A1's fallbacks pointless. (2026-09-15)
+- **A VAT letter across non-breaking spaces is attached.** `221.96&nbsp;&nbsp;H`
+  is the same line; only a block or newline boundary detaches. (2026-09-15)
+- **The prose fallback matches the label on the words at that point.** It
+  used to match a GT label against the following 120 characters, which let a
+  total-ish word anywhere in the window count and then read an amount from a
+  random offset; now it takes as many words as the GT label has (plus one,
+  stopping before the first number) and requires the amount to follow that
+  label occurrence. (2026-09-15)
+
 ## Open questions (not settled)
 
 - **Default right pane when GT exists:** Currently resets to Original image on navigation; user may want GT on the right by default for review.

@@ -192,6 +192,7 @@ def _load_aifa_results(path: Path) -> tuple[list[HypothesisRecord], dict[str, An
         "prompt": payload.get("prompt"),
         "sampling_profile": payload.get("sampling_profile"),
         "sampling": payload.get("sampling"),
+        "output_form": payload.get("output_form"),
     }
     records: list[HypothesisRecord] = []
     for case in payload.get("cases", []):

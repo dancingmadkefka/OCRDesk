@@ -178,10 +178,11 @@ def _label_matches(gt_label: str, hyp_text: str) -> bool:
     return hits == len(g_toks)
 
 
-def _value_in_labelled_row(value: str, gt_label: str, gt_col_header: str, hyp: Document) -> tuple[bool, str]:
-    """Is the value present in some hypothesis row whose label matches the GT row label (and,
-    when both sides have column headers, under a matching header)? Returns (found, note)."""
+def _value_in_labelled_row(value: str, gt_label: str, gt_col_header: str, hyp: Document) -> tuple[int, str]:
+    """How many hypothesis rows hold the value beside a label matching the GT row label (and,
+    when both sides have column headers, under a matching header)? Returns (count, note)."""
     seen_labels: list[str] = []
+    count = 0
     for table in hyp.tables:
         rows = sorted({c.row for c in table.cells})
         for r in rows:
@@ -200,12 +201,19 @@ def _value_in_labelled_row(value: str, gt_label: str, gt_col_header: str, hyp: D
                 if any(headers) and not any(_label_matches(gt_col_header, h) for h in headers if h):
                     seen_labels.append(f"column {headers}")
                     continue
-            return True, ""
-    return False, f"value present only in rows labelled {seen_labels[:3]}" if seen_labels else "value not found in any hyp table row"
+            count += 1
+    if count:
+        return count, ""
+    return 0, f"value present only in rows labelled {seen_labels[:3]}" if seen_labels else "value not found in any hyp table row"
+
+
 
 def _value_near_label_in_text(value: str, gt_label: str, body_text_norm: str) -> bool:
-    """Last resort for totals that a model kept as prose: the first amount that follows an
-    occurrence of the label (within 80 characters) has the same cents as the value."""
+    """Last resort for totals that a model kept as prose ("<p>Net Pay <span>1650.40</span></p>"):
+    some occurrence of the label is followed within 80 characters by an amount with the same
+    cents as the value. The label is matched on the words at that point of the text (as many as
+    the GT label has, plus one, stopping before the first number) so trailing text can neither
+    help nor hurt the match."""
     from ocrgrade.fintoken import extract_tokens
 
     body = body_text_norm.casefold()
@@ -215,64 +223,109 @@ def _value_near_label_in_text(value: str, gt_label: str, body_text_norm: str) ->
     cents = _cents_of(value)
     if cents is None:
         return False
-    first = g_toks[0]
-    start = 0
-    while True:
-        pos = body.find(first, start)
-        if pos < 0:
-            return False
-        window_label = body[pos: pos + 120]
-        if _label_matches(gt_label, window_label):
-            label_end = pos + len(" ".join(g_toks))
-            following = body_text_norm[label_end: label_end + 80]
-            amounts = [t for t in extract_tokens(following) if t.type == "amount" and t.cents is not None]
-            if amounts:
-                return amounts[0].cents == cents
-        start = pos + 1
+    n_raw = len(_LABEL_TOKEN_RE.findall(gt_label.casefold()))
+    for m in re.finditer(r"(?<!\w)" + re.escape(g_toks[0]), body):
+        pos = m.start()
+        window = body[pos: pos + 120]
+        words = []
+        for w in _LABEL_TOKEN_RE.finditer(window):
+            if w.group(0).isdigit() or len(words) > n_raw:
+                break
+            words.append(w)
+        if not words:
+            continue
+        candidate = " ".join(w.group(0) for w in words)
+        if not _label_matches(gt_label, candidate):
+            continue
+        label_end = pos + words[-1].end()
+        following = body_text_norm[label_end: label_end + 80]
+        amounts = [t for t in extract_tokens(following) if t.type == "amount" and t.cents is not None]
+        if amounts and amounts[0].cents == cents:
+            return True
+    return False
 
+
+def _count_value_occurrences(value: str, hyp: Document) -> int:
+    """Occurrences of the value in a document: amount tokens (table cells and prose alike) with
+    the same cents. A1 applies it to the GT and the hypothesis alike."""
+    cents = _cents_of(value)
+    if cents is None:
+        v = _squash(value)
+        return sum(1 for t in hyp.tables for c in t.cells if c.is_span_origin and v and v in _squash(c.text_norm))
+    return sum(1 for t in hyp.fin_tokens if t.type == "amount" and t.cents == cents)
+
+
+def _usable_label(gt_label: str) -> str:
+    """A paragraph is not a usable label: a total-ish one degrades to 'total' (any total-ish row
+    or pair in the hypothesis then counts), any other to no label at all."""
+    if len(_label_tokens(gt_label)) > 8:
+        return "total" if _TOTAL_KEYWORD_RE.search(gt_label) else ""
+    return gt_label
+
+
+def _value_beside_label_outside_tables(value: str, gt_label: str, hyp: Document) -> bool:
+    """The value sits beside its label outside any table: as a label-value line ('Total: 66.71')
+    or as prose ('<p>Net Pay <span>1650.40</span></p>'). Shared by A1 and A2."""
+    if not gt_label:
+        return False
+    cents = _cents_of(value)
+    for pair in hyp.label_value_pairs:
+        if _label_matches(gt_label, pair.label) and (
+            _squash(value) in _squash(pair.value) or (cents is not None and cents == _cents_of(pair.value))
+        ):
+            return True
+    return _value_near_label_in_text(value, gt_label, hyp.body_text_norm)
 
 
 def _check_a1(gt: Document, hyp: Document, sidecar: Sidecar) -> AssertionResult:
     """Critical values must sit in a hypothesis row (or label-value pair) whose label matches the
     GT label in meaning, and under a matching column header when both tables have one. Exact
     grid coordinates are accepted as a fast path; they are not required, because models split
-    and merge tables freely. Fields without a cell_ref come from totals outside tables."""
+    and merge tables freely. Fields without a cell_ref come from totals outside tables. A value
+    the GT repeats must occur at least that often in the hypothesis, so dropping one of two
+    printed totals cannot pass the gate. Both sides are counted here with the same counter;
+    the sidecar's expected_multiplicity is written for the reviewer and never read by score,
+    so a sidecar annotated by an older tokenizer cannot skew the gate."""
     fields = list(sidecar.critical_fields)
     if not fields:
         return AssertionResult("A1", True, True, "no critical fields to check")
 
     lookup = _hyp_cell_lookup(hyp)
     failures: list[str] = []
+    multiplicity_checked: set[str] = set()
     for cf in fields:
         ref = cf.cell_ref
         gt_label, gt_header = cf.label, ""
+        aligned = False
         if ref is not None:
             key = (ref.table_index, ref.row, ref.col)
             hyp_cell = lookup.get(key)
             if hyp_cell is not None and _value_in_cell(cf.value, hyp_cell):
-                continue
+                aligned = True
             if ref.table_index < len(gt.tables):
                 gt_table = gt.tables[ref.table_index]
                 gt_label = gt_label or _row_label(gt_table, ref.row, ref.col)
                 gt_header = _col_header(gt_table, ref.col)
-        if len(_label_tokens(gt_label)) > 8:
-            # a paragraph is not a usable label: any total-ish row or pair in the hypothesis counts
-            gt_label = "total" if _TOTAL_KEYWORD_RE.search(gt_label) else ""
-        found, note = _value_in_labelled_row(cf.value, gt_label, gt_header, hyp)
-        if not found and gt_label:
-            # the value may sit beside its label outside any table (a 'Total: 66.71' line)
-            cents = _cents_of(cf.value)
-            for pair in hyp.label_value_pairs:
-                if _label_matches(gt_label, pair.label) and (
-                    _squash(cf.value) in _squash(pair.value)
-                    or (cents is not None and cents == _cents_of(pair.value))
-                ):
-                    found = True
-                    break
-        if not found and gt_label:
-            found = _value_near_label_in_text(cf.value, gt_label, hyp.body_text_norm)
-        if not found:
-            failures.append(f"critical field {cf.role}={cf.value!r} (GT label {gt_label!r}): {note}")
+        gt_label = _usable_label(gt_label)
+        note = ""
+        if not aligned:
+            count, note = _value_in_labelled_row(cf.value, gt_label, gt_header, hyp)
+            aligned = count > 0
+        if not aligned:
+            aligned = _value_beside_label_outside_tables(cf.value, gt_label, hyp)
+        if not aligned:
+            failures.append(f"critical field {cf.role}={cf.value!r} (GT label {gt_label!r}): {note or 'not found beside its label'}")
+            continue
+        if cf.value in multiplicity_checked:
+            continue
+        multiplicity_checked.add(cf.value)
+        expected = _count_value_occurrences(cf.value, gt)
+        if expected > 1:
+            occurrences = _count_value_occurrences(cf.value, hyp)
+            if occurrences < expected:
+                failures.append(
+                    f"critical field {cf.role}={cf.value!r} appears {occurrences}x in hyp, GT has it {expected}x"
+                )
     passed = not failures
     detail = "all critical fields aligned" if passed else "; ".join(failures)
     return AssertionResult("A1", True, passed, detail)
@@ -323,10 +376,21 @@ def _check_a2(gt: Document, hyp: Document) -> AssertionResult:
                     break
             if found:
                 break
+        if not found and cell.table_index < len(gt.tables):
+            # Models merge tables and keep summaries as prose, so a GT total row that carries no
+            # total keyword rarely lands in a hyp *totals* row. Accept it where A1 would: in a hyp
+            # row whose label matches the GT row label, or beside that label outside any table.
+            gt_table = gt.tables[cell.table_index]
+            gt_label = _usable_label(_row_label(gt_table, cell.row, cell.col))
+            value = next((t.canonical for t in cell.tokens if t.type == "amount" and t.canonical), cell.text_norm)
+            found = (
+                _value_in_labelled_row(value, gt_label, _col_header(gt_table, cell.col), hyp)[0] > 0
+                or _value_beside_label_outside_tables(value, gt_label, hyp)
+            )
         if not found:
             failures.append(
                 f"GT total value {cell.text_norm!r} (table {cell.table_index} row {cell.row}) "
-                "not found in any hyp totals row"
+                "not found in any hyp totals row nor beside its label"
             )
     passed = not failures
     detail = "all GT totals matched in a hyp totals row" if passed else "; ".join(failures)
