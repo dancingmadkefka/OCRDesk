@@ -46,10 +46,17 @@ repo. Pass it with `--corpus <AIFA GT Set> --aifa-results <path to html_vlm_*.js
 
 Per case, the grader reads `hypothesis_raw` when present (the model's
 unprocessed output - may be markdown or plain text, and is run through
-`markdown.to_html` with a sniffed hint), falling back to `hypothesis_html`
-(already HTML-wrapped by the harness, so it is used as-is). A case whose
+`markdown.to_html`), falling back to `hypothesis_html`
+(already HTML-wrapped by the harness, so it is used as-is). The format hint is
+sniffed from the content; when the sniff says plain text but the case (or run)
+declares `output_form: markdown|html`, the declared form wins, because the harness
+knows the prompt's contract. A case whose
 `status` is not `"ok"` is graded as a harness failure (CATASTROPHIC tier, all
-metrics null) rather than an empty transcription error. Run-level metadata
+metrics null) rather than an empty transcription error. Two cheap catastrophic
+detectors also run on every case: runaway or near-empty output (hypothesis text
+longer than 5x or shorter than 0.1x the GT text) and CER above 0.8; both give
+`CATASTROPHIC` with the reason in `errors`, so a model that loops never earns a
+negative or misleading score. Run-level metadata
 (`model`, `quant`, `prompt`, `sampling`) is read from the JSON's top-level
 fields and carried into `summary.json` / `leaderboard.csv`.
 
@@ -93,9 +100,12 @@ Workflow:
 
 1. `python -m ocrgrade annotate --corpus <dir> [--manifest ocr_manifest.json]`
    walks the corpus, and for every case that does not already have a
-   **confirmed** sidecar, derives one from the GT html (category via keyword
-   regex over the GT text, with the manifest's `document_type` as a fallback
-   prior; locale from an IBAN country code or the manifest's `language`;
+   **confirmed** sidecar, derives one from the GT html (category from the
+   manifest's `document_type` when the case has one - the manifest is curated, so
+   it is the prior that wins; a keyword regex over the GT text only fills in when
+   the manifest says nothing; AIFA's `{"cases": [{"id": ...}]}` manifest shape
+   is understood as well as flat lists and dicts; locale from an IBAN country
+   code or the manifest's `language`;
    currency/decimal separator/VAT-letter scheme from the GT's financial
    tokens; required sections from `section_header`-role elements; critical
    fields from `total_value`-role cells; label/value pairs and line-item

@@ -218,14 +218,26 @@ output alongside the app, documented fully in `docs/grader.md` and
 outside those docs, because they trade away something a more thorough design
 would have kept:
 
-- **Grid-position alignment, not tree alignment.** `table_recognition_metric`'s
-  `TEDS` returns a bare score with no node mapping, so ocrgrade pairs GT and
-  hypothesis tables by document order and compares cells at identical
-  `(table, row, col)` coordinates after rowspan/colspan expansion. This is
-  cheap and deterministic, but a single omitted row shifts every later row's
-  coordinates, so one real omission can present as a cascade of aligned-cell
-  failures rather than one. Accepted for the MVP; `tests/grader/fixtures/we_missing_row`
-  documents the failure mode on purpose rather than hiding it.
+- **Row-label alignment, not grid coordinates and not tree alignment.**
+  `table_recognition_metric`'s `TEDS` returns a bare score with no node mapping,
+  and the first real model outputs showed that exact `(table, row, col)`
+  coordinates fail as soon as a model splits or merges a table, even with every
+  value present. A critical value therefore counts as correctly placed when it
+  sits in a hypothesis row whose label matches the GT row label word for word
+  ("Closing Balance" never matches "Opening Balance", "Total" never matches
+  "Subtotal"; a word of five or more characters tolerates a small OCR slip) and,
+  when both tables have header rows, under a matching column header. Exact
+  coordinates remain a fast path. The cell-content metric is row-aligned for the
+  same reason. A same-row column swap is accepted on purpose. What is lost: a
+  value duplicated into a second row with the same label is caught by A3, not A1.
+  `tests/grader/fixtures/we_missing_row` shows the consequence: an omitted line
+  item no longer cascades into aligned-cell failures; it fires the non-critical
+  A8, caps the display score at 74, and keeps the case off the archival-safe list.
+- **Two catastrophic detectors run before scoring.** Runaway or near-empty output
+  (length ratio above 5x or below 0.1x of the GT text) and CER above 0.8 give
+  `CATASTROPHIC` outright. Added after Qwen3.5 2B and PaddleOCR-VL produced
+  looping outputs 10-18x the reference length that would otherwise have scored
+  as negative numbers.
 - **Tiers and score ceilings are a deliberate, coarse gate.** `CATASTROPHIC` /
   `REJECT` / `PASS` plus a `DisplayScore` ceiling (59 when any critical
   assertion fails, 74 when critical assertions pass but label/value or
