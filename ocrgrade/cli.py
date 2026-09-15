@@ -446,15 +446,17 @@ def _run_score_like(
         report.write_case_json(result, cases_out_dir / f"{result.case_id}.json")
 
     current_fp = sidecar.annotator_fingerprint()
-    stale = [
-        cf.case_id for cf in case_files_list
-        if getattr(cf, "sidecar_path", None) is not None and cf.sidecar_path.is_file()
-        and sidecar.load(cf.sidecar_path).annotator_fingerprint != current_fp
-    ]
+    stale = []
+    for cf in case_files_list:
+        if getattr(cf, "sidecar_path", None) is None or not cf.sidecar_path.is_file():
+            continue
+        sc = sidecar.load(cf.sidecar_path)
+        if not sc.confirmed and sc.annotator_fingerprint != current_fp:  # confirmed = human-checked, never stale
+            stale.append(cf.case_id)
     if stale:
         shown = ", ".join(stale[:5]) + (", ..." if len(stale) > 5 else "")
         print(
-            f"warning: {len(stale)} sidecar(s) were annotated by a different grader build ({shown}); "
+            f"warning: {len(stale)} unconfirmed sidecar(s) were annotated by a different grader build ({shown}); "
             "derived fields may be stale - re-run `ocrgrade annotate` (confirmed sidecars are kept)",
             file=sys.stderr,
         )

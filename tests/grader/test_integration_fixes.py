@@ -363,6 +363,11 @@ def test_annotate_stamps_the_grader_build_and_score_reports_stale_sidecars(tmp_p
     assert json.loads((out / "stale" / "summary.json").read_text(encoding="utf-8"))["stale_sidecars"] == 1
     assert "annotated by a different grader build (case-001)" in capsys.readouterr().err
 
+    meta["confirmed"] = True  # a human-checked sidecar is never stale, whatever build derived it
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    assert cli.main(["score", "--corpus", str(corpus), "--hyp-dir", str(hyp_dir), "--out-dir", str(out), "--run-id", "confirmed"]) == 0
+    assert json.loads((out / "confirmed" / "summary.json").read_text(encoding="utf-8"))["stale_sidecars"] == 0
+
 
 def test_prose_totals_are_found_after_any_occurrence_of_their_label():
     gt_html = ("<table><tr><td>Total Payments</td><td>1810.50</td></tr><tr><td>Net Pay</td><td>1650.40</td></tr></table>"
@@ -479,3 +484,16 @@ def test_confirm_rejects_a_bad_value_and_writes_nothing(tmp_path: Path, capsys):
     for case in ("case-001", "case-002"):
         meta = json.loads((corpus / case / f"{case}-doc.meta.json").read_text(encoding="utf-8"))
         assert meta["confirmed"] is False
+
+
+def test_label_less_critical_value_only_has_to_be_present():
+    from ocrgrade.ir import CriticalField
+
+    gt_html = "<p>Aare-Taxi</p><p>Visa Contactless</p><p>CHF 32.40</p>"
+    gt, hyp, side = _docs(gt_html, "<p>Aare-Taxi</p><p>Visa Contactless</p><p>CHF 32.40</p>")
+    side.critical_fields = [CriticalField(role="grand_total", value="32.40", cell_ref=None, label="")]
+    a1 = {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A1"]
+    assert a1.passed, a1.detail
+    _, hyp, _ = _docs(gt_html, "<p>Aare-Taxi</p><p>Visa Contactless</p><p>CHF 32.90</p>")
+    a1 = {a.id: a for a in assertions.run_assertions(gt, hyp, side)}["A1"]
+    assert not a1.passed and "not found anywhere" in a1.detail

@@ -276,8 +276,10 @@ would have kept:
   annotated by an older tokenizer cannot skew the gate.
 - **Sidecars carry the grader build that derived them.** `annotate` stamps
   `annotator_fingerprint` (a hash of the package source); `score` warns and
-  records `stale_sidecars` in `summary.json` when the corpus was annotated by
-  a different build. The GT corpus was scored once against stale sidecars
+  records `stale_sidecars` in `summary.json` when an unconfirmed sidecar was
+  annotated by a different build of the derivation modules (canonicalizer,
+  tables, tokenizer, roles); confirmed sidecars are human-checked and never
+  count as stale, and scoring-only changes do not move the fingerprint. The GT corpus was scored once against stale sidecars
   before this guard existed and the numbers were wrong.
 
 - **A2 aligns a GT total the way A1 does.** A hypothesis "totals row" (total

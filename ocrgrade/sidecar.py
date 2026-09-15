@@ -207,15 +207,22 @@ def derive(
     )
 
 
+_DERIVATION_MODULES = ("ir.py", "canonicalize.py", "tables.py", "fintoken.py", "roles.py", "roles.yaml", "markdown.py", "sidecar.py")
+
+
 @functools.lru_cache(maxsize=1)
 def annotator_fingerprint() -> str:
-    """Short hash of the grader's own source (every .py and .yaml in the package). `annotate`
-    stamps it into each sidecar so `score` can tell when the derived fields predate the code."""
+    """Short hash of the modules that derive a sidecar (canonicalizer, tables, tokenizer, roles,
+    this module). `annotate` stamps it into each sidecar so `score` can tell when the derived
+    fields of an unconfirmed sidecar predate the code. Scoring-only modules are left out on
+    purpose: a change to an assertion does not make an annotation stale."""
     pkg = Path(__file__).resolve().parent
     digest = hashlib.sha256()
-    for path in sorted(pkg.glob("*.py")) + sorted(pkg.glob("*.yaml")):
-        digest.update(path.name.encode("utf-8"))
-        digest.update(path.read_bytes())
+    for name in _DERIVATION_MODULES:
+        path = pkg / name
+        if path.is_file():
+            digest.update(name.encode("utf-8"))
+            digest.update(path.read_bytes())
     return digest.hexdigest()[:12]
 
 

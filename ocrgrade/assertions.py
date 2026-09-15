@@ -313,6 +313,11 @@ def _check_a1(gt: Document, hyp: Document, sidecar: Sidecar) -> AssertionResult:
             aligned = count > 0
         if not aligned:
             aligned = _value_beside_label_outside_tables(cf.value, gt_label, hyp)
+        if not aligned and not gt_label:
+            # a critical value that carries no label anywhere (a bare 'CHF 32.40' on a terminal receipt)
+            # can only be required to be present; the multiplicity check below still applies
+            aligned = _count_value_occurrences(cf.value, hyp) > 0
+            note = "value not found anywhere in the hypothesis"
         if not aligned:
             failures.append(f"critical field {cf.role}={cf.value!r} (GT label {gt_label!r}): {note or 'not found beside its label'}")
             continue
